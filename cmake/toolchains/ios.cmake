@@ -30,6 +30,17 @@ set(CMAKE_OSX_SYSROOT "${QSID_SDK}" CACHE STRING "" FORCE)
 set(CMAKE_OSX_ARCHITECTURES "${QSID_ARCH}" CACHE STRING "" FORCE)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "${QSID_IOS_MIN}" CACHE STRING "" FORCE)
 
+# CMAKE_SYSTEM_PROCESSOR n'est pas renseignée pour iOS (CMake ne déduit rien de
+# l'hôte en cross-compilation, et c'est la variable *cible*). Or plusieurs
+# dépendances l'utilisent telle quelle :
+#   - libjpeg-turbo 3.0.1 : string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} ...) →
+#     « string no output variable specified » (constaté sur runner) ;
+#   - OpenVDB : if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm" ...) → « if » invalide ;
+#   - GMP/OpenSSL : choix de la cible/du triplet.
+# C'est la cause racine la plus citée par les portages comparables. On l'annonce
+# donc explicitement — c'est aussi la vérité : la cible est arm64.
+set(CMAKE_SYSTEM_PROCESSOR "${QSID_ARCH}" CACHE STRING "" FORCE)
+
 # On ne veut pas de .app pour les bibliothèques/exécutables intermédiaires.
 set(CMAKE_MACOSX_BUNDLE OFF)
 
