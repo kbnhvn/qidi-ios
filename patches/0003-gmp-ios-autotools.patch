@@ -1,16 +1,17 @@
 diff --git a/deps/+GMP/GMP.cmake b/deps/+GMP/GMP.cmake
-index 724db2e..a05ddd9 100644
+index 724db2e..1df93ad 100644
 --- a/deps/+GMP/GMP.cmake
 +++ b/deps/+GMP/GMP.cmake
-@@ -22,6 +22,7 @@ else ()
+@@ -22,6 +22,8 @@ else ()
      set(_gmp_build_tgt "${CMAKE_SYSTEM_PROCESSOR}")
  
      set(_cross_compile_arg "")
-+    set(_gmp_extra_args "")
++    set(_gmp_env_args "")
++    set(_gmp_conf_args "")
      if (APPLE)
          if (CMAKE_OSX_ARCHITECTURES)
              set(_gmp_build_tgt ${CMAKE_OSX_ARCHITECTURES})
-@@ -31,12 +32,33 @@ else ()
+@@ -31,12 +33,38 @@ else ()
              set(_gmp_build_tgt aarch64)
          endif()
  
@@ -32,9 +33,14 @@ index 724db2e..a05ddd9 100644
 +            set(_cross_compile_arg --host=${_gmp_build_tgt}-apple-ios)
 +            set(_gmp_build_tgt "--build=${CMAKE_HOST_SYSTEM_PROCESSOR}-apple-darwin")
 +            set(_gmp_ccflags "${CMAKE_CXX_FLAGS_${_buildtype_upper}} -fPIC -DPIC -arch ${CMAKE_OSX_ARCHITECTURES} -miphoneos-version-min=${DEP_OSX_TARGET} -isysroot ${CMAKE_OSX_SYSROOT}")
-+            list(APPEND _gmp_extra_args --disable-assembly)
++            # --disable-assembly est une option de ./configure ; les affectations
++            # VAR=valeur, elles, doivent précéder le programme dans env. Mélanger
++            # les deux fait exécuter « env: --disable-assembly: No such file ».
++            list(APPEND _gmp_conf_args --disable-assembly)
 +            if (QSID_HOST_CC)
-+                list(APPEND _gmp_extra_args "CC_FOR_BUILD=${QSID_HOST_CC}")
++                # GMP compile *et exécute* des générateurs : il leur faut un
++                # compilateur pour la machine de build, pas pour iOS.
++                list(APPEND _gmp_env_args "CC_FOR_BUILD=${QSID_HOST_CC}")
 +            endif ()
 +        else ()
 +            if (CMAKE_OSX_ARCHITECTURES)
@@ -49,7 +55,7 @@ index 724db2e..a05ddd9 100644
      elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
          if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
              set(_gmp_ccflags "${_gmp_ccflags} -march=armv7-a") # Works on RPi-4
-@@ -47,7 +69,10 @@ else ()
+@@ -47,7 +75,10 @@ else ()
          set(_gmp_build_tgt "") # let it guess
      endif()
  
@@ -61,12 +67,12 @@ index 724db2e..a05ddd9 100644
          # TOOLCHAIN_PREFIX should be defined in the toolchain file
          set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
      endif ()
-@@ -58,7 +83,7 @@ else ()
+@@ -58,7 +89,7 @@ else ()
          URL_HASH SHA256=eae9326beb4158c386e39a356818031bd28f3124cf915f8c5b1dc4c7a36b4d7c
          DOWNLOAD_DIR ${${PROJECT_NAME}_DEP_DOWNLOAD_DIR}/GMP
          BUILD_IN_SOURCE ON 
 -        CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
-+        CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ${_gmp_extra_args} ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
++        CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ${_gmp_env_args} ./configure ${_cross_compile_arg} ${_gmp_conf_args} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
          BUILD_COMMAND     make -j
          INSTALL_COMMAND   make install
      )

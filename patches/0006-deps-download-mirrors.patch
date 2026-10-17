@@ -1,8 +1,8 @@
 diff --git a/deps/+GMP/GMP.cmake b/deps/+GMP/GMP.cmake
-index a05ddd9..f1c7342 100644
+index 1df93ad..8d96266 100644
 --- a/deps/+GMP/GMP.cmake
 +++ b/deps/+GMP/GMP.cmake
-@@ -79,7 +79,12 @@ else ()
+@@ -85,7 +85,12 @@ else ()
  
      ExternalProject_Add(dep_GMP
          EXCLUDE_FROM_ALL ON
