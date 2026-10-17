@@ -14,18 +14,24 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      full:
-        description: "Lancer aussi les jobs longs (dépendances iOS + moteur + app + IPA)"
+      scope:
+        description: "Portée de l'exécution"
         type: choice
-        options: ["false", "true"]
-        default: "false"
+        options:
+          - configure     # patches + configuration des dépendances (quelques minutes)
+          - deps-smoke    # + quelques dépendances réellement compilées pour arm64-ios
+          - full          # tout : gate hôte, moteur iOS, app, .ipa
+        default: configure
 
 # Coût : les runners macOS consomment les minutes GitHub Actions avec un
 # multiplicateur ×10, et `ios-engine` construit toutes les dépendances (1–2 h).
-# Un push ne lance donc que `configure-check` (quelques minutes, il attrape les
-# erreurs de patches/outillage) ; le build complet se déclenche à la demande :
-#   gh workflow run ios.yml -f full=true
-# ou en définissant la variable de dépôt QSID_FULL_CI=true.
+# Trois portées, du moins cher au plus cher :
+#   configure   (défaut sur push/PR) : bootstrap + configuration des dépendances
+#   deps-smoke  : quelques dépendances réellement compilées pour arm64-ios
+#   full        : gate hôte + moteur iOS + app + .ipa
+#     gh workflow run ios.yml -f scope=deps-smoke
+#     gh workflow run ios.yml -f scope=full
+# ou, pour que chaque push lance tout : gh variable set QSID_FULL_CI --body true
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -57,6 +63,40 @@ jobs:
         run: QSID_TARGET=ios scripts/build-deps.sh configure
 
   # ---------------------------------------------------------------------------
+  # 0bis. Smoke des dépendances : quelques dépendances réellement compilées pour
+  #       arm64-iphoneos (recettes CMake, autotools GMP/MPFR, z3), en quelques
+  #       minutes. C'est la vérification à faire passer avant le build complet.
+  # ---------------------------------------------------------------------------
+  deps-smoke:
+    needs: configure-check
+    if: ${{ inputs.scope == 'deps-smoke' || inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install cmake ninja
+
+      - name: Bootstrap des sources amont
+        run: scripts/bootstrap.sh
+
+      - name: Dépendances ciblées pour iOS (smoke)
+        run: QSID_TARGET=ios scripts/build-deps.sh smoke
+
+      - name: Journal du smoke
+        if: failure()
+        run: |
+          for log in $(find build/deps-ios -name '*-configure-*.log' -o -name '*-build-*.log' 2>/dev/null | tail -3); do
+            echo "=== $log"
+            tail -60 "$log"
+          done
+          for cfg in $(find build/deps-ios -name config.log 2>/dev/null | tail -3); do
+            echo "=== $cfg (les autotools expliquent tout ici, et nulle part ailleurs)"
+            tail -60 "$cfg"
+          done
+
+  # ---------------------------------------------------------------------------
   # 1. Gate hôte : compile le moteur pour macOS et slice un cube de test.
   #    Rapide à lire, et c'est le seul endroit où un binaire s'exécute.
   # ---------------------------------------------------------------------------
@@ -64,7 +104,7 @@ jobs:
     needs: configure-check
     # `env` n'est pas disponible dans un `if` de job : l'expression est répétée
     # telle quelle sur les trois jobs longs.
-    if: ${{ vars.QSID_FULL_CI == 'true' || (github.event_name == 'workflow_dispatch' && inputs.full == 'true') }}
+    if: ${{ inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
     runs-on: macos-15
     timeout-minutes: 240
     steps:
@@ -104,7 +144,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios-engine:
     needs: configure-check
-    if: ${{ vars.QSID_FULL_CI == 'true' || (github.event_name == 'workflow_dispatch' && inputs.full == 'true') }}
+    if: ${{ inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
     runs-on: macos-15
     timeout-minutes: 360
     steps:
@@ -163,7 +203,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios-app:
     needs: ios-engine
-    if: ${{ vars.QSID_FULL_CI == 'true' || (github.event_name == 'workflow_dispatch' && inputs.full == 'true') }}
+    if: ${{ inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
     runs-on: macos-15
     timeout-minutes: 120
     steps:

@@ -43,12 +43,14 @@ Pourquoi c'est plausible malgré tout :
    ```
 2. Un push ne lance que **`configure-check`** (quelques minutes : patches + configuration des
    dépendances) — les runners macOS sont facturés ×10 en minutes Actions et le build complet dure 1–2 h.
-   Le build complet se déclenche **à la demande** :
+   Trois portées, du moins cher au plus cher :
    ```bash
-   gh workflow run ios.yml -f full=true
+   gh workflow run ios.yml -f scope=configure    # défaut (ce que fait un push)
+   gh workflow run ios.yml -f scope=deps-smoke   # + quelques dépendances compilées pour arm64-ios
+   gh workflow run ios.yml -f scope=full         # tout : gate hôte, moteur iOS, app, .ipa
    ```
-   (ou définir la variable de dépôt `QSID_FULL_CI=true` pour que chaque push le lance).
-3. Il enchaîne : gate hôte → dépendances iOS (mises en cache) → moteur arm64 → app →
+   (ou `gh variable set QSID_FULL_CI --body true` pour que chaque push lance tout).
+3. `full` enchaîne : gate hôte → dépendances iOS (mises en cache) → moteur arm64 → app →
    **`QSlicerPad-unsigned.ipa`** en artefact.
 4. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
 

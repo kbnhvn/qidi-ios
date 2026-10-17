@@ -49,6 +49,9 @@ Le workflow [`.github/workflows/ios.yml`](../.github/workflows/ios.yml) fait tou
 
 0. `configure-check` — bootstrap + **configuration** des dépendances iOS (sans compiler). Quelques
    minutes : c'est là que se révèlent les erreurs de patches et d'outillage, avant les builds longs.
+0bis. `deps-smoke` — quelques dépendances **réellement compilées** pour arm64-iphoneos (Qhull, JPEG,
+   PNG, Expat, heatshrink via CMake ; GMP/MPFR via autotools ; z3 ; Eigen/Cereal en en-têtes seuls),
+   avec vérification `lipo` des architectures et `vtool` de la plateforme sur un objet extrait.
 1. `host-gate` — dépendances + moteur + **exécution** du slicing sur un cube → artefact de G-code.
 2. `ios-engine` — dépendances + `libslic3r` + ABI C pour **arm64-iphoneos** → archive fusionnée,
    avec des contrôles : architecture `arm64`, symboles `Slicer::CLI` présents, symboles `qsid_*`
@@ -57,13 +60,14 @@ Le workflow [`.github/workflows/ios.yml`](../.github/workflows/ios.yml) fait tou
    profils présents), puis **`.ipa` non signée** en artefact.
 
 **Déclenchement et coût.** Les runners macOS consomment les minutes Actions avec un multiplicateur
-**×10**, et `ios-engine` construit toutes les dépendances (1–2 h). Les jobs 1 à 3 ne tournent donc que
-sur demande :
+**×10**, et `ios-engine` construit toutes les dépendances (1–2 h). Les portées 0bis à 3 ne tournent donc
+que sur demande :
 
 ```bash
-gh workflow run ios.yml -f full=true      # tout
-gh run watch                              # suivre
-gh run view --log-failed                  # lire les échecs
+gh workflow run ios.yml -f scope=deps-smoke   # vérification rapide du toolchain iOS
+gh workflow run ios.yml -f scope=full         # tout
+gh run watch                                  # suivre
+gh run view --log-failed                      # lire les échecs
 ```
 
 Un simple `push` (ou une PR) ne lance que `configure-check`. Pour que chaque push lance tout :

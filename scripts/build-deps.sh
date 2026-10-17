@@ -45,6 +45,40 @@ if [ "${1:-all}" = "configure" ]; then
     exit 0
 fi
 
+# `scripts/build-deps.sh smoke` : ne construire qu'un petit sous-ensemble, choisi
+# pour exercer les chemins risqués — recettes CMake (Qhull/JPEG/PNG), autotools
+# avec triples croisés (GMP/MPFR), z3 (C++ volumineux), en-têtes seuls
+# (Eigen/Cereal). Quelques minutes au lieu de 1–2 h : c'est la vérification à
+# faire passer avant d'engager le build complet.
+if [ "${1:-all}" = "smoke" ]; then
+    smoke_packages=(Eigen Cereal heatshrink EXPAT JPEG PNG Qhull GMP MPFR z3)
+    for pkg in "${smoke_packages[@]}"; do
+        info "smoke : dep_$pkg"
+        cmake --build "$QSID_DEPS_BUILD" --parallel "$QSID_JOBS" --target "dep_$pkg"
+    done
+
+    info "smoke : bibliothèques installées dans $QSID_DEPS_PREFIX/lib"
+    while IFS= read -r lib; do
+        printf '    %-34s %s\n' "$(basename "$lib")" "$(lipo -archs "$lib" 2>/dev/null || echo '?')"
+    done < <(find "$QSID_DEPS_PREFIX/lib" -maxdepth 1 -name '*.a' | sort)
+
+    # Preuve de plateforme : on extrait un objet d'une archive et on demande à
+    # vtool pour quel OS il a été produit (attendu : iOS).
+    tmp="$(mktemp -d)"
+    first_lib="$(find "$QSID_DEPS_PREFIX/lib" -maxdepth 1 -name '*.a' | sort | head -1)"
+    if [ -n "$first_lib" ]; then
+        ( cd "$tmp" && ar x "$first_lib" 2>/dev/null || true
+          obj="$(find . -type f | head -1)"
+          if [ -n "$obj" ]; then
+              echo "    plateforme de $(basename "$first_lib") :"
+              vtool -show-build "$obj" | sed 's/^/        /'
+          fi )
+    fi
+    rm -rf "$tmp"
+    info "smoke OK — le toolchain iOS compile et installe réellement des dépendances"
+    exit 0
+fi
+
 info "deps : build (${QSID_JOBS} jobs)"
 cmake --build "$QSID_DEPS_BUILD" --parallel "$QSID_JOBS"
 
