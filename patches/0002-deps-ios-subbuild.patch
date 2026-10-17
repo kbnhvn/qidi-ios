@@ -1,5 +1,5 @@
 diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
-index 131f164..80a1975 100644
+index 131f164..9b0391f 100644
 --- a/deps/CMakeLists.txt
 +++ b/deps/CMakeLists.txt
 @@ -96,6 +96,34 @@ if (APPLE)
@@ -13,14 +13,6 @@ index 131f164..80a1975 100644
 +    # build iOS et produit des binaires inutilisables (le classique « Darwin dans
 +    # un build iOS »).
 +    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
-+        # Le préfixe des dépendances ET le sysroot doivent être dans le root path :
-+        # un sysroot confine find_package, et sans l'entrée du préfixe chaque
-+        # sous-build recompile sa propre copie… ou pire, emprunte celle de l'hôte.
-+        # Le séparateur de liste est échappé : sans cela, CMAKE_ARGS (une liste
-+        # CMake) couperait la valeur en deux arguments distincts.
-+        set(_dep_find_roots ${CMAKE_FIND_ROOT_PATH} ${${PROJECT_NAME}_DEP_INSTALL_PREFIX})
-+        string(REPLACE ";" "\\;" _dep_find_roots_escaped "${_dep_find_roots}")
-+
 +        list(APPEND DEP_CMAKE_OPTS
 +            "-DCMAKE_SYSTEM_NAME=iOS"
 +            "-DCMAKE_SYSTEM_VERSION=1"
@@ -28,10 +20,18 @@ index 131f164..80a1975 100644
 +            # qui installent des outils en ligne de commande échouent alors en
 +            # « no BUNDLE DESTINATION » (Qhull le premier, puis PNG/JPEG/Expat).
 +            "-DCMAKE_MACOSX_BUNDLE=OFF"
-+            "-DCMAKE_FIND_ROOT_PATH=${_dep_find_roots_escaped}"
-+            "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
-+            "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
-+            "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY"
++            # Plusieurs dépendances déclarent encore cmake_minimum_required() < 3.5
++            # (Eigen 3.3.7, par exemple) et CMake 4 refuse alors de configurer :
++            # « Compatibility with CMake < 3.5 has been removed ». Cette variable
++            # rétablit la tolérance. Les portages comparables épinglent CMake 3.31
++            # pour la même raison — ceinture et bretelles.
++            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
++            # Ni CMAKE_FIND_ROOT_PATH ni les modes *_MODE_* ne sont passés ici : une
++            # liste contenant des ';' ne survit pas à la double expansion de
++            # CMAKE_ARGS (constaté sur runner : la valeur part en arguments
++            # séparés). C'est le toolchain iOS — rechargé par chaque sous-build via
++            # CMAKE_TOOLCHAIN_FILE — qui pose le root path (sysroot + préfixe des
++            # dépendances) et les modes.
 +        )
 +    endif ()
  endif ()
