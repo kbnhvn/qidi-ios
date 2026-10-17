@@ -116,7 +116,9 @@ jobs:
       - name: Cache des dépendances (hôte)
         uses: actions/cache@v4
         with:
-          path: build/deps-host
+          path: |
+            build/deps-host
+            build/dl-cache
           key: deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
 
       - name: Bootstrap des sources amont
@@ -156,7 +158,9 @@ jobs:
       - name: Cache des dépendances (iOS)
         uses: actions/cache@v4
         with:
-          path: build/deps-ios
+          path: |
+            build/deps-ios
+            build/dl-cache
           key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
 
       - name: Bootstrap des sources amont
