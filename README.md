@@ -41,9 +41,16 @@ Pourquoi c'est plausible malgré tout :
    git remote add origin git@github.com:<vous>/qidi-ios.git
    git push -u origin main
    ```
-2. Le workflow [`ios.yml`](.github/workflows/ios.yml) enchaîne : gate hôte → dépendances iOS (1–2 h,
-   mises en cache) → moteur arm64 → app → **`QSlicerPad-unsigned.ipa`** en artefact.
-3. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
+2. Un push ne lance que **`configure-check`** (quelques minutes : patches + configuration des
+   dépendances) — les runners macOS sont facturés ×10 en minutes Actions et le build complet dure 1–2 h.
+   Le build complet se déclenche **à la demande** :
+   ```bash
+   gh workflow run ios.yml -f full=true
+   ```
+   (ou définir la variable de dépôt `QSID_FULL_CI=true` pour que chaque push le lance).
+3. Il enchaîne : gate hôte → dépendances iOS (mises en cache) → moteur arm64 → app →
+   **`QSlicerPad-unsigned.ipa`** en artefact.
+4. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
 
 ## Construction locale (macOS requis)
 
