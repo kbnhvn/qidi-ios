@@ -1,21 +1,23 @@
 diff --git a/deps/+PNG/PNG.patch b/deps/+PNG/PNG.patch
-index 3e6a70d..5642476 100644
+index 3e6a70d..8129503 100644
 --- a/deps/+PNG/PNG.patch
 +++ b/deps/+PNG/PNG.patch
-@@ -24,3 +24,17 @@ Common subdirectories: ../libpng-1.6.35-orig/powerpc and ./powerpc
+@@ -24,3 +24,19 @@ Common subdirectories: ../libpng-1.6.35-orig/powerpc and ./powerpc
  Common subdirectories: ../libpng-1.6.35-orig/projects and ./projects
  Common subdirectories: ../libpng-1.6.35-orig/scripts and ./scripts
  Common subdirectories: ../libpng-1.6.35-orig/tests and ./tests
 +--- ../libpng-1.6.35-orig/pngpriv.h	2026-10-18 01:38:47.864434184 +0200
-++++ ./pngpriv.h	2026-10-18 01:38:47.890651669 +0200
-+@@ -515,7 +515,10 @@
+++++ ./pngpriv.h	2026-10-18 01:41:15.842647882 +0200
++@@ -514,8 +514,12 @@
++     */
 + #  include <float.h>
 + 
+++   /* QIDISlicer-iOS : TARGET_OS_MAC vaut 1 sur iOS aussi, alors que <fp.h>
+++    * n'existe que dans le SDK macOS. On restreint la branche <fp.h> à macOS ;
+++    * sous iOS c'est <math.h> qui est utilisé. */
 + #  if (defined(__MWERKS__) && defined(macintosh)) || defined(applec) || \
 +-    defined(THINK_C) || defined(__SC__) || defined(TARGET_OS_MAC)
 ++    defined(THINK_C) || defined(__SC__) || \
-++    /* TARGET_OS_MAC vaut 1 sur iOS aussi, or <fp.h> n'existe que dans le SDK
-++     * macOS : sous iOS on garde <math.h> (correction QIDISlicer-iOS). */
 ++    (defined(TARGET_OS_MAC) && !TARGET_OS_IPHONE)
 +    /* We need to check that <math.h> hasn't already been included earlier
 +     * as it seems it doesn't agree with <fp.h>, yet we should really use
