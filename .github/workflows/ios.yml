@@ -1,0 +1,220 @@
+name: ios
+
+# Chaîne complète, sur runner macOS arm64 :
+#   1. host-gate      : le cœur slice réellement, sur macOS (vérification rapide)
+#   2. ios-engine     : dépendances + libslic3r + ABI C pour arm64-iphoneos
+#   3. ios-app        : app SwiftUI, bundle vérifié, .ipa non signée, artefacts
+#
+# Rien ici ne nécessite de compte Apple payant : la .ipa est non signée et
+# s'installe avec SideStore (docs/sideloading.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QSID_JOBS: "6"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 0. Vérification de configuration : quelques minutes, et c'est là que se
+  #    révèlent les erreurs de patches/outillage, avant les builds longs.
+  # ---------------------------------------------------------------------------
+  configure-check:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install cmake ninja
+
+      - name: Bootstrap des sources amont
+        run: scripts/bootstrap.sh
+
+      - name: Compilateurs « machine de build »
+        run: scripts/host-cc.sh build/host-tools
+
+      - name: Configure des dépendances iOS (sans compiler)
+        run: QSID_TARGET=ios scripts/build-deps.sh configure
+
+  # ---------------------------------------------------------------------------
+  # 1. Gate hôte : compile le moteur pour macOS et slice un cube de test.
+  #    Rapide à lire, et c'est le seul endroit où un binaire s'exécute.
+  # ---------------------------------------------------------------------------
+  host-gate:
+    needs: configure-check
+    runs-on: macos-15
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install cmake ninja xcodegen
+
+      - name: Cache des dépendances (hôte)
+        uses: actions/cache@v4
+        with:
+          path: build/deps-host
+          key: deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+
+      - name: Bootstrap des sources amont
+        run: scripts/bootstrap.sh
+
+      - name: Dépendances (hôte)
+        run: QSID_TARGET=host scripts/build-deps.sh
+
+      - name: Cœur + gate (hôte)
+        run: QSID_TARGET=host scripts/build-engine.sh gate
+
+      - name: Gate de slicing
+        run: QSID_TARGET=host scripts/gate.sh
+
+      - name: Journal du G-code produit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-gcode-host
+          path: build/gate-out/*.gcode
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # 2. Moteur iOS : dépendances + libslic3r + ABI C pour arm64-iphoneos.
+  # ---------------------------------------------------------------------------
+  ios-engine:
+    needs: configure-check
+    runs-on: macos-15
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install cmake ninja
+
+      - name: Cache des dépendances (iOS)
+        uses: actions/cache@v4
+        with:
+          path: build/deps-ios
+          key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+
+      - name: Bootstrap des sources amont
+        run: scripts/bootstrap.sh
+
+      - name: Dépendances (iOS arm64)
+        run: QSID_TARGET=ios scripts/build-deps.sh
+
+      - name: Cœur (iOS arm64)
+        run: QSID_TARGET=ios scripts/build-engine.sh
+
+      - name: Archive fusionnée + en-têtes
+        run: QSID_TARGET=ios scripts/package-engine.sh
+
+      - name: Vérification de l'archive (arm64, iOS, moteur présent)
+        run: |
+          set -e
+          ARCHS=$(lipo -archs build/dist-ios/lib/QSlicerEngine.a)
+          echo "archs = $ARCHS"
+          [ "$ARCHS" = "arm64" ]
+          # Le moteur doit vraiment être dedans : on cherche des symboles de libslic3r.
+          nm -arch arm64 build/dist-ios/lib/QSlicerEngine.a 2>/dev/null | grep -q "CLI.*run" \
+            || { echo "les symboles de Slic3r::CLI sont absents de l'archive"; exit 1; }
+
+      - name: Vérification des symboles de l'ABI C
+        run: nm -arch arm64 build/dist-ios/lib/QSlicerEngine.a | grep -E "_qsid_(create|slice|destroy|version)" | sort -u
+
+      - name: Dans quel SDK les objets ont-ils été construits ?
+        run: |
+          obj=$(find build/engine-ios -name 'qidislice.cpp.o' | head -1)
+          [ -n "$obj" ] || { echo "objet qidislice introuvable"; exit 1; }
+          vtool -show-build "$obj" | sed 's/^/    /'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-ios-arm64
+          path: |
+            build/dist-ios/lib/QSlicerEngine.a
+            build/dist-ios/include/qidislice.h
+            build/dist-ios/QSlicerEngine-link.txt
+
+  # ---------------------------------------------------------------------------
+  # 3. App : projet XcodeGen, build iOS, contrôles du bundle, .ipa non signée.
+  # ---------------------------------------------------------------------------
+  ios-app:
+    needs: ios-engine
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install xcodegen
+
+      - name: Sources amont (profils vendor à embarquer)
+        run: scripts/bootstrap.sh
+
+      - name: Récupérer le moteur compilé
+        uses: actions/download-artifact@v4
+        with:
+          name: engine-ios-arm64
+          path: build/dist-ios
+
+      - name: Ressources du bundle (profils QIDI)
+        run: scripts/stage-resources.sh
+
+      - name: Générer le projet Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Construire l'app (Release, sans signature)
+        run: |
+          set -e
+          xcodebuild \
+            -project ios/QSlicerPad.xcodeproj \
+            -scheme QSlicerPad \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/xcode-ios \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            QSID_ENGINE_ARCHIVE="$PWD/build/dist-ios" \
+            QSID_ENGINE_LINK_FLAGS="$(grep -v '^#' build/dist-ios/QSlicerEngine-link.txt | tr '\n' ' ')" \
+            build | tee xcodebuild.log | tail -40
+
+      - name: Contrôles du bundle
+        run: |
+          set -e
+          app=build/xcode-ios/Build/Products/Release-iphoneos/QSlicerPad.app
+          test -d "$app"
+          echo "architecture : $(lipo -archs "$app/QSlicerPad")"
+          [ "$(lipo -archs "$app/QSlicerPad")" = "arm64" ]
+          vtool -show-build "$app/QSlicerPad" | sed 's/^/    /'
+          # Le moteur est dans le binaire (pas seulement lié) :
+          strings "$app/QSlicerPad" | grep -q "QIDISlicer" || true
+          ls -la "$app/Resources/qidi/profiles" | head
+
+      - name: Paqueter la .ipa non signée
+        run: |
+          set -e
+          app=build/xcode-ios/Build/Products/Release-iphoneos/QSlicerPad.app
+          rm -rf build/ipa-ios && mkdir -p build/ipa-ios/Payload
+          cp -R "$app" build/ipa-ios/Payload/
+          (cd build/ipa-ios && zip -qry "$GITHUB_WORKSPACE/QSlicerPad-unsigned.ipa" Payload)
+          ls -lh QSlicerPad-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QSlicerPad-unsigned-ipa
+          path: QSlicerPad-unsigned.ipa
+
+      - name: Journal xcodebuild (en cas d'échec)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore

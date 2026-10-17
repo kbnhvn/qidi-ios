@@ -1,0 +1,72 @@
+diff --git a/deps/+GMP/GMP.cmake b/deps/+GMP/GMP.cmake
+index 724db2e..a05ddd9 100644
+--- a/deps/+GMP/GMP.cmake
++++ b/deps/+GMP/GMP.cmake
+@@ -22,6 +22,7 @@ else ()
+     set(_gmp_build_tgt "${CMAKE_SYSTEM_PROCESSOR}")
+ 
+     set(_cross_compile_arg "")
++    set(_gmp_extra_args "")
+     if (APPLE)
+         if (CMAKE_OSX_ARCHITECTURES)
+             set(_gmp_build_tgt ${CMAKE_OSX_ARCHITECTURES})
+@@ -31,12 +32,33 @@ else ()
+             set(_gmp_build_tgt aarch64)
+         endif()
+ 
+-        if (CMAKE_OSX_ARCHITECTURES)
+-            set(_cross_compile_arg --host=${_gmp_build_tgt}-apple-darwin21)
+-        endif ()
++        if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++            # iOS : trois écarts par rapport à macOS (détaillés dans docs/risks.md).
++            #
++            # 1) autoconf doit voir deux triples *différents* : avec --build == --host
++            #    il se croit natif, compile puis exécute ses programmes de test, et
++            #    échoue sous la forme trompeuse « could not find a working compiler ».
++            # 2) l'assembleur de GMP choisit sa syntaxe de relocation d'après l'OS
++            #    hôte ; « ios » ne correspond à aucun motif *-darwin*, il émet donc
++            #    de l'ELF que l'assembleur Mach-O rejette (`adrp x7, :got:sym`).
++            # 3) GMP compile et exécute des générateurs : il faut un compilateur qui
++            #    produise du code pour la *machine de build* (CC_FOR_BUILD), et non
++            #    le clang de la cible iOS, sinon les tests internes échouent.
++            set(_cross_compile_arg --host=${_gmp_build_tgt}-apple-ios)
++            set(_gmp_build_tgt "--build=${CMAKE_HOST_SYSTEM_PROCESSOR}-apple-darwin")
++            set(_gmp_ccflags "${CMAKE_CXX_FLAGS_${_buildtype_upper}} -fPIC -DPIC -arch ${CMAKE_OSX_ARCHITECTURES} -miphoneos-version-min=${DEP_OSX_TARGET} -isysroot ${CMAKE_OSX_SYSROOT}")
++            list(APPEND _gmp_extra_args --disable-assembly)
++            if (QSID_HOST_CC)
++                list(APPEND _gmp_extra_args "CC_FOR_BUILD=${QSID_HOST_CC}")
++            endif ()
++        else ()
++            if (CMAKE_OSX_ARCHITECTURES)
++                set(_cross_compile_arg --host=${_gmp_build_tgt}-apple-darwin21)
++            endif ()
+ 
+-        set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
+-        set(_gmp_build_tgt "--build=${_gmp_build_tgt}-apple-darwin")
++            set(_gmp_ccflags "${_gmp_ccflags} -mmacosx-version-min=${DEP_OSX_TARGET}")
++            set(_gmp_build_tgt "--build=${_gmp_build_tgt}-apple-darwin")
++        endif ()
+     elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+         if (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+             set(_gmp_ccflags "${_gmp_ccflags} -march=armv7-a") # Works on RPi-4
+@@ -47,7 +69,10 @@ else ()
+         set(_gmp_build_tgt "") # let it guess
+     endif()
+ 
+-    if (CMAKE_CROSSCOMPILING)
++    # Sur Apple, le triple --host est déjà posé ci-dessus : la branche générique
++    # l'écraserait par un TOOLCHAIN_PREFIX vide (convention Linux). C'est le bug
++    # « MPFR passed a bare --host= » rencontré par les autres portages de cette base.
++    if (CMAKE_CROSSCOMPILING AND NOT APPLE)
+         # TOOLCHAIN_PREFIX should be defined in the toolchain file
+         set(_cross_compile_arg --host=${TOOLCHAIN_PREFIX})
+     endif ()
+@@ -58,7 +83,7 @@ else ()
+         URL_HASH SHA256=eae9326beb4158c386e39a356818031bd28f3124cf915f8c5b1dc4c7a36b4d7c
+         DOWNLOAD_DIR ${${PROJECT_NAME}_DEP_DOWNLOAD_DIR}/GMP
+         BUILD_IN_SOURCE ON 
+-        CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
++        CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ${_gmp_extra_args} ./configure ${_cross_compile_arg} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
+         BUILD_COMMAND     make -j
+         INSTALL_COMMAND   make install
+     )

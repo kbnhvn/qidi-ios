@@ -1,0 +1,53 @@
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index 131f164..80a1975 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -96,6 +96,34 @@ if (APPLE)
+         "-DCMAKE_FIND_FRAMEWORK=LAST"
+         "-DCMAKE_FIND_APPBUNDLE=LAST"
+     )
++
++    # --- iOS ------------------------------------------------------------------
++    # Les sous-builds (ExternalProject) n'héritent pas de CMAKE_SYSTEM_NAME : sans
++    # cette ligne, chaque dépendance se reconfigure pour macOS *à l'intérieur* d'un
++    # build iOS et produit des binaires inutilisables (le classique « Darwin dans
++    # un build iOS »).
++    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++        # Le préfixe des dépendances ET le sysroot doivent être dans le root path :
++        # un sysroot confine find_package, et sans l'entrée du préfixe chaque
++        # sous-build recompile sa propre copie… ou pire, emprunte celle de l'hôte.
++        # Le séparateur de liste est échappé : sans cela, CMAKE_ARGS (une liste
++        # CMake) couperait la valeur en deux arguments distincts.
++        set(_dep_find_roots ${CMAKE_FIND_ROOT_PATH} ${${PROJECT_NAME}_DEP_INSTALL_PREFIX})
++        string(REPLACE ";" "\\;" _dep_find_roots_escaped "${_dep_find_roots}")
++
++        list(APPEND DEP_CMAKE_OPTS
++            "-DCMAKE_SYSTEM_NAME=iOS"
++            "-DCMAKE_SYSTEM_VERSION=1"
++            # CMake fait un bundle de *chaque* exécutable sur iOS : les dépendances
++            # qui installent des outils en ligne de commande échouent alors en
++            # « no BUNDLE DESTINATION » (Qhull le premier, puis PNG/JPEG/Expat).
++            "-DCMAKE_MACOSX_BUNDLE=OFF"
++            "-DCMAKE_FIND_ROOT_PATH=${_dep_find_roots_escaped}"
++            "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
++            "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
++            "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY"
++        )
++    endif ()
+ endif ()
+ 
+ list_projects(FOUND_PACKAGES ${CMAKE_CURRENT_LIST_DIR})
+@@ -115,6 +143,13 @@ if (UNIX)
+     endif ()
+ endif ()
+ 
++# iOS : OpenGL n'y est pas le GL desktop (c'est OpenGL ES, et déprécié), et le
++# libcurl du système n'est pas celui qu'attend cette base : on les construit
++# depuis les recettes quand ils servent, au lieu de les emprunter au SDK.
++if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
++    list(REMOVE_ITEM SYSTEM_PROVIDED_PACKAGES OpenGL CURL)
++endif ()
++
+ list(APPEND SYSTEM_PROVIDED_PACKAGES ${${PROJECT_NAME}_PLATFORM_PACKAGES})
+ list(REMOVE_DUPLICATES SYSTEM_PROVIDED_PACKAGES)
+ 

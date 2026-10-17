@@ -1,0 +1,21 @@
+# Artefacts binaires livrés pour l'analyse (trop gros pour git)
+*.dmg
+*.zip
+*.ipa
+
+# Sources tierces clonées et arbres de build
+/third_party/
+/build/
+/build-*/
+/.tooling/
+
+# Sorties Xcode / XcodeGen
+ios/*.xcodeproj/
+ios/build/
+DerivedData/
+*.xcuserdatad
+
+# Divers
+.DS_Store
+*.o
+*.a

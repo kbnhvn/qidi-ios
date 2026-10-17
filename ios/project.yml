@@ -1,0 +1,70 @@
+name: QSlicerPad
+
+# Projet XcodeGen. `xcodegen generate` recrée QSlicerPad.xcodeproj — le .xcodeproj
+# n'est pas versionné (voir docs/architecture.md, « pourquoi XcodeGen »).
+#
+# La ligne de liens dépend de deux réglages fournis par scripts/package-ipa.sh :
+#   QSID_ENGINE_ARCHIVE   répertoire build/dist-<cible> (archive + en-têtes)
+#   QSID_ENGINE_LINK_FLAGS bibliothèques/frameworks du SDK à réajouter
+#     (une archive statique ne transporte pas le code que le moteur résout dans le SDK)
+
+options:
+  bundleIdPrefix: net.kbnhvn
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+    CLANG_CXX_LIBRARY: "libc++"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    ALWAYS_SEARCH_USER_PATHS: NO
+    # Le moteur est un gros objet statique : pas de bitcode, et on garde tout.
+    ENABLE_BITCODE: NO
+
+targets:
+  QSlicerPad:
+    type: application
+    platform: iOS
+    sources:
+      - path: QSlicerPad
+        excludes:
+          - "Resources/Info.plist"
+    settings:
+      base:
+        PRODUCT_NAME: QSlicerPad
+        PRODUCT_BUNDLE_IDENTIFIER: net.kbnhvn.qslicerpad
+        INFOPLIST_FILE: QSlicerPad/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # ABI C du moteur
+        SWIFT_OBJC_BRIDGING_HEADER: QSlicerPad/Support/QSlicerPad-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - "$(QSID_ENGINE_ARCHIVE)/include"
+        LIBRARY_SEARCH_PATHS:
+          - "$(QSID_ENGINE_ARCHIVE)/lib"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "$(QSID_ENGINE_ARCHIVE)/lib/QSlicerEngine.a"
+          - "$(QSID_ENGINE_LINK_FLAGS)"
+          - "-lc++"
+          - "-lz"
+          - "-liconv"
+          - "-lexpat"
+          - "-framework"
+          - "Foundation"
+          - "-framework"
+          - "CoreFoundation"
+          - "-framework"
+          - "CoreGraphics"
+          - "-framework"
+          - "CoreServices"
+          - "-framework"
+          - "IOKit"
+          - "-framework"
+          - "ModelIO"
+          - "-framework"
+          - "Accelerate"

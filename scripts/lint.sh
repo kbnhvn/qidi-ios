@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Vérifications disponibles *sans* macOS ni SDK iOS : syntaxe des scripts, YAML,
+# application de la série de patches, et analyse syntaxique de nos CMakeLists par
+# un harnais. À lancer avant de pousser — la CI fait le reste (compilation réelle).
+#
+#   scripts/lint.sh
+#
+# Sur Linux, les étapes qui exigent Xcode/clang sont marquées « ignoré ».
+set -euo pipefail
+. "$(dirname "$0")/lib/common.sh"
+
+fail=0
+note() { printf '%-52s %s\n' "$1" "$2"; }
+ok()   { note "$1" "ok"; }
+skip() { note "$1" "ignoré ($2)"; }
+bad()  { note "$1" "ÉCHEC"; fail=1; }
+
+echo "--- scripts shell"
+while IFS= read -r s; do
+    if bash -n "$s" 2>/dev/null; then ok "$(basename "$s")"; else bad "$(basename "$s")"; fi
+done < <(find "$QSID_ROOT/scripts" -name '*.sh' -type f | sort)
+
+echo "--- YAML"
+PY="${QSID_PYTHON:-python3}"
+for y in "$QSID_ROOT/.github/workflows/ios.yml" "$QSID_ROOT/ios/project.yml"; do
+    if "$PY" -c "import sys,yaml; yaml.safe_load(open(sys.argv[1]))" "$y" 2>/dev/null; then
+        ok "$(basename "$y")"
+    else
+        bad "$(basename "$y")"
+    fi
+done
+
+echo "--- série de patches"
+if [ -d "$QSID_SRC/.git" ]; then
+    git -C "$QSID_SRC" reset -q --hard "$QSID_REV"
+    git -C "$QSID_SRC" clean -qfd -e ios-core || true
+    for p in "$QSID_ROOT"/patches/*.patch; do
+        if git -C "$QSID_SRC" apply --check "$p" 2>/dev/null; then
+            ok "$(basename "$p")"
+        else
+            bad "$(basename "$p") (ne s'applique pas sur $QSID_REV)"
+        fi
+    done
+else
+    skip "patches" "sources amont absentes (scripts/bootstrap.sh)"
+fi
+
+echo "--- syntaxe CMake (harnais avec cibles factices)"
+# cmake est fourni par la CI/macOS ; sous Linux, en installer un est possible sans
+# root via un venv : `python3 -m venv .tooling/venv && .tooling/venv/bin/pip install cmake`
+# puis QSID_CMAKE=.tooling/venv/bin/cmake scripts/lint.sh
+cmake_bin="${QSID_CMAKE:-$(command -v cmake || true)}"
+[ -z "$cmake_bin" ] && [ -x "$QSID_ROOT/.tooling/venv/bin/cmake" ] && cmake_bin="$QSID_ROOT/.tooling/venv/bin/cmake"
+if [ -n "$cmake_bin" ]; then
+    harness="$(mktemp -d)"
+    mkdir -p "$harness/src"
+    cp -R "$QSID_ROOT/core" "$harness/src/ios-core"
+    cat > "$harness/src/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.20)
+project(qsid_lint CXX)
+set(CMAKE_CXX_STANDARD 17)
+# Cibles factices à la place de celles de l'amont, pour ne tester que la syntaxe
+# et les références de ios-core/CMakeLists.txt.
+set(SLIC3R_CLI_SOURCES)
+foreach(t libslic3r libcereal slic3r-arrange-wrapper libseqarrange stb_image)
+    add_library(${t} INTERFACE)
+endforeach()
+add_subdirectory(ios-core)
+EOF
+    if "$cmake_bin" -S "$harness/src" -B "$harness/build" -G "Unix Makefiles" \
+            > "$harness/out.txt" 2>&1; then
+        ok "core/CMakeLists.txt (configure)"
+    elif grep -qiE "parse error|while evaluating|unknown CMake command" "$harness/out.txt"; then
+        bad "core/CMakeLists.txt : $(grep -iE 'parse error|while evaluating|unknown CMake command' "$harness/out.txt" | head -1)"
+    else
+        # Un échec de génération (pas de compilateur C++ par ex.) ne met pas en
+        # cause la syntaxe de nos fichiers.
+        skip "core/CMakeLists.txt" "configure impossible ici : $(tail -2 "$harness/out.txt" | tr '\n' ' ' | cut -c1-70)"
+    fi
+    rm -rf "$harness"
+else
+    skip "syntaxe CMake" "cmake absent"
+fi
+
+echo "--- toolchain iOS (analyse syntaxique)"
+if [ -n "$cmake_bin" ]; then
+    probe="$(mktemp -d)"
+    printf 'cmake_minimum_required(VERSION 3.20)\nproject(probe C CXX)\n' > "$probe/CMakeLists.txt"
+    if "$cmake_bin" -S "$probe" -B "$probe/b" \
+            -DCMAKE_TOOLCHAIN_FILE="$QSID_TOOLCHAIN" -DQSID_SDK=iphoneos \
+            > "$probe/out.txt" 2>&1; then
+        ok "cmake/toolchains/ios.cmake"
+    elif grep -qiE "parse error|while evaluating|syntax error" "$probe/out.txt"; then
+        bad "ios.cmake : $(grep -iE 'parse error|while evaluating|syntax error' "$probe/out.txt" | head -1)"
+    else
+        skip "ios.cmake" "configure interrompu (attendu hors macOS) : $(tail -1 "$probe/out.txt" | cut -c1-70)"
+    fi
+    rm -rf "$probe"
+fi
+
+echo "--- divers"
+if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
+    ok "testdata/cube_20mm.stl (12 facettes)"
+else
+    bad "testdata/cube_20mm.stl"
+fi
+for k in bed_shape layer_height perimeters gcode_flavor; do
+    grep -q "^$k" "$QSID_ROOT/testdata/qidi_generic_fff.ini" || bad "clé $k absente de qidi_generic_fff.ini"
+done
+ok "testdata/qidi_generic_fff.ini"
+
+if [ "$fail" = "0" ]; then
+    echo
+    echo "lint : tout est vert (les étapes macOS/SDK restent à la CI)."
+else
+    echo
+    echo "lint : au moins une vérification a échoué."
+    exit 1
+fi

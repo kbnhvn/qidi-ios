@@ -1,0 +1,21 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 5306346..5451619 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -141,6 +141,16 @@ endif ()
+ 
+ target_link_libraries(QIDISlicer PRIVATE libslic3r libcereal slic3r-arrange-wrapper libseqarrange stb_image)
+ 
++# --- QIDISlicer pour iOS : moteur + ABI C, dans le même arbre -----------------
++# ios-core/ est installé ici par scripts/bootstrap.sh (copie de core/ du projet).
++# La cible réutilise SLIC3R_CLI_SOURCES — c'est-à-dire Slic3r::CLI::run, le point
++# d'entrée que le binaire desktop utilise déjà — pour slicer dans le processus de
++# l'app, sans sous-processus (impossibles sous iOS).
++option(SLIC3R_IOS_CORE "Build the iOS engine wrapper (ios-core/)" OFF)
++if (SLIC3R_IOS_CORE)
++    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../ios-core ios-core)
++endif ()
++
+ if (APPLE)
+ #    add_compile_options(-stdlib=libc++)
+ #    add_definitions(-DBOOST_THREAD_DONT_USE_CHRONO -DBOOST_NO_CXX11_RVALUE_REFERENCES -DBOOST_THREAD_USES_MOVE)
