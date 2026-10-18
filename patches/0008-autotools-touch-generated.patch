@@ -1,0 +1,34 @@
+diff --git a/deps/+GMP/GMP.cmake b/deps/+GMP/GMP.cmake
+index 8d96266..b98beb4 100644
+--- a/deps/+GMP/GMP.cmake
++++ b/deps/+GMP/GMP.cmake
+@@ -85,6 +85,12 @@ else ()
+ 
+     ExternalProject_Add(dep_GMP
+         EXCLUDE_FROM_ALL ON
++        # Les archives autotools livrent aclocal.m4/configure/Makefile.in avec des
++        # horodatages trop proches (voire égaux) : make croit devoir les régénérer
++        # avec autoconf/automake, absents du runner -> « automake-1.16: command not
++        # found ». On les touche pour qu'ils soient strictement plus récents que
++        # leurs dépendances ; aucun outil supplémentaire n'est nécessaire.
++        PATCH_COMMAND ${CMAKE_COMMAND} -E touch aclocal.m4 configure Makefile.in
+         # gmplib.org est régulièrement injoignable depuis un runner (timeout
+         # status 28 constaté). ExternalProject essaie chaque URL dans l'ordre ;
+         # le URL_HASH ci-dessous reste la preuve qu'on obtient le bon fichier.
+diff --git a/deps/+MPFR/MPFR.cmake b/deps/+MPFR/MPFR.cmake
+index 5e87360..4a549a4 100644
+--- a/deps/+MPFR/MPFR.cmake
++++ b/deps/+MPFR/MPFR.cmake
+@@ -29,6 +29,12 @@ else ()
+ 
+     ExternalProject_Add(dep_MPFR
+         EXCLUDE_FROM_ALL ON
++        # Les archives autotools livrent aclocal.m4/configure/Makefile.in avec des
++        # horodatages trop proches (voire égaux) : make croit devoir les régénérer
++        # avec autoconf/automake, absents du runner -> « automake-1.16: command not
++        # found ». On les touche pour qu'ils soient strictement plus récents que
++        # leurs dépendances ; aucun outil supplémentaire n'est nécessaire.
++        PATCH_COMMAND ${CMAKE_COMMAND} -E touch aclocal.m4 configure Makefile.in
+         #URL http://ftp.vim.org/ftp/gnu/mpfr/mpfr-3.1.6.tar.bz2 https://www.mpfr.org/mpfr-3.1.6/mpfr-3.1.6.tar.bz2  # mirrors are allowed
+         #URL_HASH SHA256=cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068
+         # Dépôt principal fragile, comme pour GMP : miroirs GNU vérifiés

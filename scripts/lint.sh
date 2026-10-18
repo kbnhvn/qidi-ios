@@ -30,15 +30,18 @@ for y in "$QSID_ROOT/.github/workflows/ios.yml" "$QSID_ROOT/ios/project.yml"; do
     fi
 done
 
-echo "--- série de patches"
+echo "--- série de patches (appliqués en séquence, comme bootstrap.sh)"
 if [ -d "$QSID_SRC/.git" ]; then
     git -C "$QSID_SRC" reset -q --hard "$QSID_REV"
     git -C "$QSID_SRC" clean -qfd -e ios-core || true
     for p in "$QSID_ROOT"/patches/*.patch; do
-        if git -C "$QSID_SRC" apply --check "$p" 2>/dev/null; then
+        # Un patch de la série peut dépendre des précédents (contexte déplacé par
+        # un patch antérieur) : c'est la *séquence* qu'il faut valider, pas chaque
+        # patch isolément.
+        if git -C "$QSID_SRC" apply "$p" 2>/dev/null; then
             ok "$(basename "$p")"
         else
-            bad "$(basename "$p") (ne s'applique pas sur $QSID_REV)"
+            bad "$(basename "$p") (n'applique pas après les précédents, sur $QSID_REV)"
         fi
     done
 else
