@@ -117,13 +117,13 @@ struct GCodePreview {
     func geometry(upTo layerIndex: Int, color: UIColor = .systemOrange) -> SCNGeometry? {
         guard !layers.isEmpty else { return nil }
         let last = min(max(layerIndex, 0), layers.count - 1)
-        var points: [SIMD3<Float>] = []
+        var points: [SCNVector3] = []
         let total = layers.prefix(last + 1).reduce(0) { $0 + $1.segments.count }
         points.reserveCapacity(total)
         for (index, layer) in layers.enumerated() where index <= last {
             let z = layer.z
             for p in layer.segments {
-                points.append(SIMD3<Float>(p.x, p.y, z))
+                points.append(SCNVector3(p.x, p.y, z))
             }
         }
         guard !points.isEmpty else { return nil }

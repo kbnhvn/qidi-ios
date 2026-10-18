@@ -89,7 +89,9 @@ enum STLLoader {
 
     /// Géométrie SceneKit (triangles) à partir d'un maillage.
     static func geometry(from mesh: STLMesh, color: UIColor = .systemOrange) -> SCNGeometry {
-        let source = SCNGeometrySource(vertices: mesh.vertices)
+        // SCNGeometrySource(vertices:) attend des SCNVector3 (pas des SIMD3<Float>).
+        let points = mesh.vertices.map { SCNVector3($0.x, $0.y, $0.z) }
+        let source = SCNGeometrySource(vertices: points)
         let indices = (0..<Int32(mesh.vertices.count)).map { $0 }
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
 
