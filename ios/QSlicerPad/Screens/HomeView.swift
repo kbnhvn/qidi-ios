@@ -82,7 +82,7 @@ struct HomeView: View {
     }
 
     private var profileSection: some View {
-        Section("Profil d'impression") {
+        Section {
             if !model.catalog.printerModels.isEmpty {
                 Picker("Imprimante", selection: $model.selectedPrinter) {
                     ForEach(model.catalog.printerModels, id: \.self) { Text($0).tag($0) }
@@ -99,6 +99,8 @@ struct HomeView: View {
                     Label("Revenir à la configuration générique", systemImage: "arrow.uturn.backward")
                 }
             }
+        } header: {
+            Text("Profil d'impression")
         } footer: {
             Text("Exportez votre profil depuis QIDISlicer desktop (Fichier → Exporter la configuration) et importez-le ici : c'est le même moteur, donc le même G-code. La sélection d'imprimante ci-dessus ne sert qu'à vous repérer tant que l'installation du bundle vendor n'est pas implémentée.")
         }

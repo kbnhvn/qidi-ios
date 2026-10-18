@@ -280,7 +280,8 @@ jobs:
 
       - name: Construire l'app (Release, sans signature)
         run: |
-          set -e
+          # pipefail : sinon l'échec de xcodebuild est masqué par le pipe vers tee/tail
+          set -euo pipefail
           xcodebuild \
             -project ios/QSlicerPad.xcodeproj \
             -scheme QSlicerPad \
@@ -294,15 +295,20 @@ jobs:
 
       - name: Contrôles du bundle
         run: |
-          set -e
+          set -euo pipefail
           app=build/xcode-ios/Build/Products/Release-iphoneos/QSlicerPad.app
           test -d "$app"
-          echo "architecture : $(lipo -archs "$app/QSlicerPad")"
-          [ "$(lipo -archs "$app/QSlicerPad")" = "arm64" ]
+          test -x "$app/QSlicerPad"
+          archs=$(lipo -archs "$app/QSlicerPad")
+          echo "architecture : $archs"
+          [ "$archs" = "arm64" ]
           vtool -show-build "$app/QSlicerPad" | sed 's/^/    /'
-          # Le moteur est dans le binaire (pas seulement lié) :
-          strings "$app/QSlicerPad" | grep -q "QIDISlicer" || true
-          ls -la "$app/Resources/qidi/profiles" | head
+          # Le moteur est réellement dans le binaire : chaîne de version de l'amont.
+          strings "$app/QSlicerPad" | grep -q "QIDISlicer-"
+          # Profils vendor embarqués (XcodeGen les copie à la racine du bundle).
+          test -f "$app/qidi/profiles/QIDITechnology.ini"
+          ls "$app/qidi/profiles" | head -5
+          du -sh "$app"
 
       - name: Paqueter la .ipa non signée
         run: |

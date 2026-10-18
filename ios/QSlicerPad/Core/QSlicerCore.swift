@@ -51,7 +51,9 @@ final class SlicerCore {
     /// Version du moteur, telle que compilée.
     static var version: String {
         var buffer = [CChar](repeating: 0, count: 128)
-        guard qsid_version(&buffer, buffer.count) == QSID_OK else { return "inconnue" }
+        // Les constantes du C (enum anonyme) sont importées en Int : on ramène le
+        // code de retour (Int32) au même type avant comparaison.
+        guard Int(qsid_version(&buffer, buffer.count)) == QSID_OK else { return "inconnue" }
         return String(cString: buffer)
     }
 
@@ -82,7 +84,7 @@ final class SlicerCore {
             }
         }
 
-        switch status {
+        switch Int(status) {
         case QSID_OK:
             return
         case QSID_ERR_ARG:
