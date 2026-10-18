@@ -21,7 +21,9 @@
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Utils.hpp"
 #include "libslic3r_version.h" // généré par la compilation amont (SLIC3R_APP_NAME/VERSION)
-#include "CLI/CLI.hpp"
+// Slic3r::CLI::run() est déclaré dans QIDISlicer.hpp (pas dans CLI/CLI.hpp) :
+// c'est le point d'entrée que le main() du binaire desktop appelle.
+#include "QIDISlicer.hpp"
 
 namespace {
 
