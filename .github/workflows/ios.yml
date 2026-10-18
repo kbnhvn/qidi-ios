@@ -23,6 +23,10 @@ on:
           - engine        # + moteur arm64-ios, app et .ipa (sans la gate hôte)
           - full          # tout : gate hôte en plus (elle exécute un slicing réel)
         default: configure
+      ui_snapshot:
+        description: "Tenter la capture d'écran en simulateur (outillage, peut échouer)"
+        type: boolean
+        default: false
 
 # Coût : les runners macOS consomment les minutes GitHub Actions avec un
 # multiplicateur ×10, et `ios-engine` construit toutes les dépendances (1–2 h).
@@ -272,7 +276,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ui-snapshot:
     needs: configure-check
-    if: ${{ inputs.scope == 'engine' || inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    if: ${{ inputs.ui_snapshot == true }}
     # Outillage de vérification visuelle, pas un livrable : le build simulateur
     # dépend d'une couche SDK du superbuild de deps (objets device/simulateur) qui
     # reste à traiter. Ne doit pas faire échouer la chaîne de livraison.
