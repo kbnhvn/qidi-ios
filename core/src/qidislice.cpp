@@ -194,13 +194,15 @@ int qsid_slice_async(qsid_ctx *ctx,
 
             const Slic3r::Points bed = Slic3r::get_bed_shape(config);
             if (bbox.defined && !bed.empty()) {
-                double minx = bed.front().x(), maxx = minx;
-                double miny = bed.front().y(), maxy = miny;
-                for (const Slic3r::Vec2d &p : bed) {
-                    minx = std::min(minx, p.x());
-                    maxx = std::max(maxx, p.x());
-                    miny = std::min(miny, p.y());
-                    maxy = std::max(maxy, p.y());
+                // `Points` contient des Point (coordonnées entières) : on repasse en
+                // double explicitement (Eigen refuse de mélanger les types).
+                double minx = static_cast<double>(bed.front().x()), maxx = minx;
+                double miny = static_cast<double>(bed.front().y()), maxy = miny;
+                for (const Slic3r::Point &p : bed) {
+                    minx = std::min(minx, static_cast<double>(p.x()));
+                    maxx = std::max(maxx, static_cast<double>(p.x()));
+                    miny = std::min(miny, static_cast<double>(p.y()));
+                    maxy = std::max(maxy, static_cast<double>(p.y()));
                 }
                 const Slic3r::Vec3d shift(
                     (minx + maxx) / 2.0 - (bbox.min.x() + bbox.max.x()) / 2.0,
