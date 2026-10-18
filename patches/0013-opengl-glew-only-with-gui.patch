@@ -1,0 +1,35 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 21983e3..fbcf221 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -487,16 +487,22 @@ endif ()
+ 
+ find_package(PNG REQUIRED)
+ 
+-set(OpenGL_GL_PREFERENCE "LEGACY")
+-find_package(OpenGL REQUIRED)
++# OpenGL et GLEW ne servent qu'a la GUI (references uniquement dans
++# src/slic3r/CMakeLists.txt). Sous iOS il n'existe pas de GL desktop (seulement
++# OpenGL ES) : les exiger bloquait la configuration du moteur. Voir surtout
++# SLIC3R_OPENGL_ES pour la voie GUI mobile (v2).
++if (SLIC3R_GUI)
++    set(OpenGL_GL_PREFERENCE "LEGACY")
++    find_package(OpenGL REQUIRED)
+ 
+-# Find glew or use bundled version
+-if (SLIC3R_STATIC AND NOT SLIC3R_STATIC_EXCLUDE_GLEW)
+-    set(GLEW_USE_STATIC_LIBS ON)
+-    set(GLEW_VERBOSE ON)
+-endif()
++    # Find glew or use bundled version
++    if (SLIC3R_STATIC AND NOT SLIC3R_STATIC_EXCLUDE_GLEW)
++        set(GLEW_USE_STATIC_LIBS ON)
++        set(GLEW_VERBOSE ON)
++    endif()
+ 
+-find_package(GLEW REQUIRED)
++    find_package(GLEW REQUIRED)
++endif ()
+ 
+ # Find the Cereal serialization library
+ find_package(cereal REQUIRED)
