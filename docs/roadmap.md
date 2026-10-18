@@ -42,6 +42,14 @@ dépendance externe.
 - [x] ✅ écran de réglages : imprimante Moonraker (hôte/port/clé), profils par défaut, langue
 - [x] ✅ icône d'app (1024², squircle + trois couches isométriques), écran de lancement
   (`UILaunchScreen`), mode sombre assuré par les couleurs système
+- [x] ✅ **ergonomie tactile iPad** : disposition deux colonnes (NavigationSplitView)
+  sur iPad / une colonne sur iPhone, actions principales pleine largeur (52 pt) et
+  boutons ≥ 44 pt, glisser-déposer d'un modèle ou d'un profil, raccourcis clavier
+  (⌘↩, Échap, ⌘O, ⌘,), retours haptiques, états vides explicites, écran maintenu
+  éveillé et tâche d'arrière-plan pendant le slicing, contrôles de caméra et
+  pas-à-pas de couche dans le visualiseur
+- [ ] 🔧 vérification **visuelle** en simulateur (job `ui-snapshot`, non bloquant) :
+  le build simulateur bute sur une couche SDK du superbuild de deps
 - [x] ✅ localisation FR/EN (dictionnaire `L10n`, sélecteur de langue ; les messages d'erreur
   techniques restent dans la langue du système)
 
