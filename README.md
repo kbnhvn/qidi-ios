@@ -16,9 +16,9 @@ sans serveur et sans sous-processus (interdits par iOS).
 | Dépendances cross-compilées (Boost, TBB, CGAL, OpenVDB, Blosc, z3, GMP/MPFR, Qhull, PNG/JPEG, Expat, heatshrink, LibBGCode, NLopt, Eigen, Cereal) | **✅ compilées pour arm64-iphoneos** | job `ios-engine` vert ; toutes les archives `lipo` = arm64, `vtool` = *platform IOS, minos 15.0* |
 | Moteur `libslic3r` + ABI C | **✅ compilés et liés** | `Cœur (iOS arm64)` vert ; archive fusionnée de **136 Mo** ; symboles `qsid_*` présents |
 | App SwiftUI | **✅ compilée et liée** | `ios-app` vert, deux fois ; binaire **27 Mo**, `Mach-O arm64`, *platform IOS, minos 17.0* |
-| `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**7,9 Mo**), profils QIDI embarqués sous `qidi/profiles/` |
+| `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**8,0 Mo**, 0.2.0 build 2), profils QIDI embarqués sous `qidi/profiles/`, icônes compilées |
 | Série de patches iOS | **✅ 16 patches**, appliqués en séquence | `scripts/lint.sh` les rejoue à chaque exécution |
-| Gate de slicing à l'exécution (hôte macOS) | **✅ verte** (run `39122327213`) | cube 20 mm slicé par les deux chemins : CLI v1 → 100 couches / 1 397,9 mm ; API objet v2 (chemin de l'app) → 100 couches / 1 397,9 mm ; progression 10→90 % observée |
+| Gate de slicing à l'exécution (hôte macOS) | **✅ verte** (run `39130857606`) | cube 20 mm slicé par les deux chemins : CLI v1 et API objet v2 (chemin de l'app) → **G-code identique octet pour octet** (8 100 lignes, 100 couches, 1 397,9 mm), objet centré, progression 10→90 % |
 | Slicing réel sur iPad | **⏳ à faire** | nécessite d'installer l'IPA (SideStore) |
 | Profils QIDI embarqués (24 imprimantes, 78 réglages, 858 filaments) | **🟡 résolution vérifiée localement** | chaînes `inherits` résolues sur le vrai bundle : `Q2 0.4 nozzle` → 94 clés, preset print → 188, filament → 89, fusion → 369 |
 | Progression + annulation du slicing | ✅ progression validée en gate ; annulation compilée | ABI `qsid_slice_async` / `qsid_cancel` au-dessus de `Print::apply/process/export_gcode` |

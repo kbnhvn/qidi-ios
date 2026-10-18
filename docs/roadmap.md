@@ -14,16 +14,18 @@ dépendance externe.
 - [x] ✅ **premier passage de la CI vert** — `ios-engine` + `ios-app` verts ; artefact
   `QSlicerPad-unsigned.ipa` produit (7,9 Mo) ; moteur de 136 Mo, app de 27 Mo (`arm64`,
   *platform IOS, minos 17.0*)
-- [x] ✅ **`scripts/gate.sh` vert sur macOS hôte** (run `39122327213`) — les **deux chemins** slicent le
+- [x] ✅ **`scripts/gate.sh` vert sur macOS hôte** (run `39130857606`) — les **deux chemins** slicent le
   cube 20 mm : CLI v1 → 8 100 lignes / 6 757 mouvements / **100 couches** / 1 397,9 mm d'extrusion ;
-  API objet v2 (chemin de l'app) → 8 101 lignes / 6 758 mouvements / **100 couches** / 1 397,9 mm.
-  Progression observée de 10 % à 90 % (Processing triangulated mesh → Exporting G-code)
+  API objet v2 (chemin de l'app) → **exactement les mêmes chiffres**, et le G-code est **identique
+  octet pour octet** (0 différence sur 8 100 lignes) ; objet **centré** (CENTER=110,110) ; progression
+  observée de 10 % à 90 %
 
 ## v1 — « ça slice sur l'iPad »
 
 - [ ] 🟡 l'app se lance sur l'iPad et slice un STL importé
-  - ✅ le **chemin de slicing de l'app** (`Print::apply` → `process` → `export_gcode`) est validé à
-    l'exécution sur macOS par la gate ; il reste à l'exercer dans le bundle iOS
+  - ✅ le **chemin de slicing de l'app** (arrange → extruders → `Print::apply` → `process` →
+    `export_gcode`) est validé à l'exécution sur macOS par la gate, avec un G-code **identique** à
+    celui de la CLI ; il reste à l'exercer dans le bundle iOS
   - critère : G-code dans `Documents/Exports`, aperçu de couches visible
 - [ ] 🟡 profil réel : profil QIDI embarqué ou `.ini` exporté du bureau
   - la résolution d'héritage du bundle vendor est **vérifiée localement** sur le vrai fichier
