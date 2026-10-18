@@ -9,6 +9,13 @@
 
 set(QSID_CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/qidislice.cpp)
 
+# Sans OCCT (SLIC3R_ENABLE_FORMAT_STEP=OFF), Format/STEP.cpp référence malgré tout
+# load_step_internal() sur Apple (liaison statique du wrapper) : on fournit un stub
+# qui fait échouer l'import STEP proprement. Voir core/src/step_stub.cpp.
+if (NOT SLIC3R_ENABLE_FORMAT_STEP)
+    list(APPEND QSID_CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/step_stub.cpp)
+endif()
+
 # SLIC3R_CLI_SOURCES est défini par src/CMakeLists.txt avec des chemins *relatifs à
 # src/* (ex. CLI/PrintHelp.cpp). Depuis ios-core/, il faut les préfixer, sinon CMake
 # les cherche ici et échoue (« Cannot find source file: QIDISlicer.hpp »).
