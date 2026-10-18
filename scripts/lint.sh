@@ -102,7 +102,9 @@ if [ -n "$cmake_bin" ]; then
 fi
 
 echo "--- compatibilité bash 3.2 (macOS livre /bin/bash 3.2)"
+# On ne regarde que le *code* : un commentaire peut citer ces noms sans risque.
 bash4_hits="$(grep -rnE "mapfile|readarray|declare -A" "$QSID_ROOT/scripts" --include="*.sh" \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' \
     | grep -v "/lint.sh:" || true)"
 if [ -z "$bash4_hits" ]; then
     ok "aucune construction bash 4+ dans les scripts"
