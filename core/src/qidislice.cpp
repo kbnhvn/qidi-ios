@@ -193,8 +193,10 @@ int qsid_slice_async(qsid_ctx *ctx,
         // contour dégénéré (ASan : set_object_range -> Polygon::douglas_peucker).
         {
             // 1) placement sur le plateau (gère aussi plusieurs objets)
-            arr2::ArrangeBed      bed = arr2::to_arrange_bed(Slic3r::get_bed_shape(config));
-            arr2::ArrangeSettings arrange_cfg;
+            const Slic3r::Vec2crd gap{ Slic3r::s_multiple_beds.get_bed_gap() };
+            Slic3r::arr2::ArrangeBed      bed =
+                Slic3r::arr2::to_arrange_bed(Slic3r::get_bed_shape(config), gap);
+            Slic3r::arr2::ArrangeSettings arrange_cfg;
             arrange_cfg.set_distance_from_objects(Slic3r::min_object_distance(config));
             Slic3r::arrange_objects(model, bed, arrange_cfg);
 
