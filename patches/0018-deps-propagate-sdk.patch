@@ -1,0 +1,17 @@
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index 4085588..c13f264 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -120,6 +120,12 @@ if (APPLE)
+             # sous-builds ne chercheraient que dans le SDK (modes *_MODE_*=ONLY) :
+             # constaté sur runner, Boost et heatshrink « introuvables ».
+             "-DQSID_DEPS_PREFIX=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}"
++            # Le toolchain relit ces variables : sans elles il retombe sur
++            # iphoneos, et un build simulateur (iphonesimulator) se retrouve avec
++            # des objets « built for iOS » -> échec de lien côté app.
++            "-DQSID_SDK=${CMAKE_OSX_SYSROOT}"
++            "-DQSID_ARCH=${CMAKE_OSX_ARCHITECTURES}"
++            "-DQSID_IOS_MIN=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+             # Ni CMAKE_FIND_ROOT_PATH ni les modes *_MODE_* ne sont passés ici : une
+             # liste contenant des ';' ne survit pas à la double expansion de
+             # CMAKE_ARGS (constaté sur runner : la valeur part en arguments
