@@ -28,8 +28,11 @@ fi
 git -C "$QSID_SRC" checkout -q --force "$QSID_REV"
 git -C "$QSID_SRC" reset -q --hard "$QSID_REV"
 
-# L'arbre doit être propre *hors* ios-core, qu'on (re)copie juste après.
+# L'arbre doit être propre, *y compris* pour les fichiers que nos patches créent
+# (par ex. deps/+z3/z3-lp-clang-typos.patch) : sans ce nettoyage, un second passage
+# échouerait avec « already exists ». ios-core/ est géré explicitement juste après.
 rm -rf "$QSID_SRC/ios-core"
+git -C "$QSID_SRC" clean -qfd -e ios-core
 
 info "application de la série de patches"
 shopt -s nullglob

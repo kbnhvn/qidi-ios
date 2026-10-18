@@ -1,0 +1,44 @@
+diff --git a/deps/+z3/z3-lp-clang-typos.patch b/deps/+z3/z3-lp-clang-typos.patch
+new file mode 100644
+index 0000000..30bb917
+--- /dev/null
++++ b/deps/+z3/z3-lp-clang-typos.patch
+@@ -0,0 +1,22 @@
++--- a/src/math/lp/static_matrix.h	2024-03-07 19:25:16.000000000 +0100
+++++ b/src/math/lp/static_matrix.h	2026-10-18 02:04:22.388813269 +0200
++@@ -79,7 +79,7 @@
++         ref(static_matrix & m, unsigned row, unsigned col):m_matrix(m), m_row(row), m_col(col) {}
++         ref & operator=(T const & v) { m_matrix.set( m_row, m_col, v); return *this; }
++ 
++-        ref operator=(ref & v) { m_matrix.set(m_row, m_col, v.m_matrix.get(v.m_row, v.m_col)); return *this; }
+++        ref operator=(ref & v) { m_matrix.set(m_row, m_col, v.m_matrix.get_elem(v.m_row, v.m_col)); return *this; }
++ 
++         operator T () const { return m_matrix.get_elem(m_row, m_col); }
++     };
++--- a/src/math/lp/column_info.h	2024-03-07 19:25:16.000000000 +0100
+++++ b/src/math/lp/column_info.h	2026-10-18 02:04:22.389153748 +0200
++@@ -47,7 +47,7 @@
++             m_lower_bound_is_strict == c.m_lower_bound_is_strict &&
++             m_upper_bound_is_set == c.m_upper_bound_is_set&&
++             m_upper_bound_is_strict == c.m_upper_bound_is_strict&&
++-            (!m_lower_bound_is_set || m_lower_bound == c.m_low_bound) &&
+++            (!m_lower_bound_is_set || m_lower_bound == c.m_lower_bound) &&
++             (!m_upper_bound_is_set || m_upper_bound == c.m_upper_bound) &&
++             m_cost == c.m_cost &&
++             m_is_fixed == c.m_is_fixed &&
+diff --git a/deps/+z3/z3.cmake b/deps/+z3/z3.cmake
+index 81736d3..dba1941 100644
+--- a/deps/+z3/z3.cmake
++++ b/deps/+z3/z3.cmake
+@@ -1,6 +1,11 @@
++# Deux coquilles latentes de z3 4.13.0 (solveur LP) ne sont instanciées que dans
++# certaines configurations : AppleClang récent les refuse (no member named 'get',
++# no member named 'm_low_bound'). Le patch ci-dessous les corrige ; il est appliqué
++# par ExternalProject juste après l'extraction.
+ add_cmake_project(z3
+   URL https://github.com/Z3Prover/z3/archive/refs/tags/z3-4.13.0.zip
+   URL_HASH SHA256=81543736dcbbbcb037a7df55d0be596245d509f3f69f56610df32728e48ee050
++  PATCH_COMMAND ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/z3-lp-clang-typos.patch
+   CMAKE_ARGS
+     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+     -DZ3_INCLUDE_GIT_HASH=OFF
