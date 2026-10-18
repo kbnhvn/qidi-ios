@@ -48,6 +48,16 @@ dépendance externe.
   (⌘↩, Échap, ⌘O, ⌘,), retours haptiques, états vides explicites, écran maintenu
   éveillé et tâche d'arrière-plan pendant le slicing, contrôles de caméra et
   pas-à-pas de couche dans le visualiseur
+- [x] ✅ **options de slicing** (`SliceOverrides`) : supports + seuil d'inclinaison,
+  brim/raft, densité de remplissage, hauteur de couche, périmètres, décalage de
+  température buse. Appliquées *par-dessus* le preset QIDI (elles ont la priorité),
+  persistées, récapitulées sur l'écran principal, accessibles depuis la barre
+  latérale et la barre d'outils (donc même barre latérale masquée). Le mapping .ini
+  est verrouillé par `scripts/tests/slice_overrides.py` (exécuté dans le lint).
+- [x] ✅ **visualiseur présenté en feuille** : « Terminé » toujours disponible (la vue
+  poussée n'offrait aucun retour) et commandes de caméra sous la scène, en boutons
+  légendés — les icônes posées en overlay sur la scène SceneKit ne recevaient pas
+  les taps sur l'appareil
 - [ ] 🔧 vérification **visuelle** en simulateur (job `ui-snapshot`, non bloquant) :
   le build simulateur bute sur une couche SDK du superbuild de deps
 - [x] ✅ localisation FR/EN (dictionnaire `L10n`, sélecteur de langue ; les messages d'erreur

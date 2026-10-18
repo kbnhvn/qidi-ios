@@ -154,6 +154,17 @@ else
     skip "L10n" "fichier absent"
 fi
 
+echo "--- miroir des algorithmes Swift (le Swift ne tourne pas ici)"
+for t in "$QSID_ROOT"/scripts/tests/*.py; do
+    [ -f "$t" ] || continue
+    if out="$("$PY" "$t")" 2>&1; then
+        ok "$(basename "$t")"
+    else
+        bad "$(basename "$t")"
+        printf '%s\n' "$out" | tail -4 | sed 's/^/    /'
+    fi
+done
+
 echo "--- divers"
 if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
     ok "testdata/cube_20mm.stl (12 facettes)"
