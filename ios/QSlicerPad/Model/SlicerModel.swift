@@ -6,6 +6,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit   // UIApplication : écran éveillé + tâche d'arrière-plan
 
 @MainActor
 final class SlicerModel: ObservableObject {
@@ -47,6 +48,11 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var progressText: String = ""
     @Published private(set) var statusLine: String?
     @Published private(set) var errorMessage: String?
+
+    /// Incrémentés une fois par événement : déclenchent les retours haptiques
+    /// (.sensoryFeedback) dans les vues.
+    @Published private(set) var successTick = 0
+    @Published private(set) var errorTick = 0
 
     // MARK: Imprimante (Moonraker)
 
@@ -187,6 +193,22 @@ final class SlicerModel: ObservableObject {
         }
     }
 
+    /// Import par glisser-déposer (Fichiers, Shapr3D, AirDrop…).
+    /// Retourne true si le fichier a été accepté (sinon iOS refuse le drop).
+    func acceptDroppedFiles(_ urls: [URL]) -> Bool {
+        guard let url = urls.first else { return false }
+        switch url.pathExtension.lowercased() {
+        case "stl", "3mf", "obj", "amf":
+            importModel(from: url)
+            return true
+        case "ini":
+            importProfile(from: url)
+            return true
+        default:
+            return false
+        }
+    }
+
     func importProfile(from url: URL) {
         errorMessage = nil
         do {
@@ -211,6 +233,22 @@ final class SlicerModel: ObservableObject {
         guard let core else { return }
         let stlURL = workDirectory.appendingPathComponent(model.deletingPathExtension().lastPathComponent + ".stl")
         Task {
+            // Un slicing dure de quelques secondes à quelques minutes : on empêche
+            // la mise en veille et on demande du temps d'exécution en arrière-plan
+            // (iOS suspend sinon l'app dès qu'elle passe en fond).
+            UIApplication.shared.isIdleTimerDisabled = true
+            var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "qsid.slice") {
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            }
+            defer {
+                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
+
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     DispatchQueue.global(qos: .userInitiated).async {
@@ -298,13 +336,16 @@ final class SlicerModel: ObservableObject {
                 self.progress = 1
                 self.progressText = "Terminé"
                 self.preview = try? GCodePreview.parse(url: outputURL)
+                self.successTick += 1
             } catch SlicerCoreError.canceled {
-                self.statusLine = "Slicing annulé."
+                self.errorTick += 1
+                self.statusLine = L10n.t("Slicing annulé.")
                 self.progress = 0
                 self.progressText = ""
             } catch {
                 self.errorMessage = error.localizedDescription
                 self.statusLine = nil
+                self.errorTick += 1
             }
             self.isSlicing = false
         }

@@ -102,6 +102,19 @@ enum L10n {
         "QSlicerPad est un portage iPadOS non officiel du moteur de QIDISlicer, distribué sous AGPL-3.0 — comme QIDISlicer, dont il dérive. Le code source de cette application est disponible avec l'archive du projet.":
             "QSlicerPad is an unofficial iPadOS port of QIDISlicer's engine, released under AGPL-3.0 — like QIDISlicer, from which it derives. The source code ships with the project archive.",
         "Version du moteur": "Engine version",
-        "Licence": "License"
+        "Licence": "License",
+        "Aucun modèle": "No model",
+        "Aucun profil embarqué": "No embedded profile",
+        "Importez un STL, 3MF, OBJ ou AMF — ou déposez le fichier dans l'app.":
+            "Import an STL, 3MF, OBJ or AMF — or drop the file onto the app.",
+        "Importez un profil .ini exporté depuis QIDISlicer desktop.":
+            "Import a .ini profile exported from desktop QIDISlicer.",
+        "Vue": "View",
+        "Dessus": "Top",
+        "Face": "Front",
+        "Isométrique": "Isometric",
+        "Recadrer": "Frame",
+        "Couche précédente": "Previous layer",
+        "Couche suivante": "Next layer"
     ]
 }
