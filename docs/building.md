@@ -52,6 +52,7 @@ Le workflow [`.github/workflows/ios.yml`](../.github/workflows/ios.yml) fait tou
 0bis. `deps-smoke` — quelques dépendances **réellement compilées** pour arm64-iphoneos (Qhull, JPEG,
    PNG, Expat, heatshrink via CMake ; GMP/MPFR via autotools ; z3 ; Eigen/Cereal en en-têtes seuls),
    avec vérification `lipo` des architectures et `vtool` de la plateforme sur un objet extrait.
+   **Statut : vert** (toutes les bibliothèques produites sont arm64, plateforme IOS, minos 15.0).
 1. `host-gate` — dépendances + moteur + **exécution** du slicing sur un cube → artefact de G-code.
 2. `ios-engine` — dépendances + `libslic3r` + ABI C pour **arm64-iphoneos** → archive fusionnée,
    avec des contrôles : architecture `arm64`, symboles `Slicer::CLI` présents, symboles `qsid_*`

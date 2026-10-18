@@ -20,7 +20,8 @@ on:
         options:
           - configure     # patches + configuration des dépendances (quelques minutes)
           - deps-smoke    # + quelques dépendances réellement compilées pour arm64-ios
-          - full          # tout : gate hôte, moteur iOS, app, .ipa
+          - engine        # + moteur arm64-ios, app et .ipa (sans la gate hôte)
+          - full          # tout : gate hôte en plus (elle exécute un slicing réel)
         default: configure
 
 # Coût : les runners macOS consomment les minutes GitHub Actions avec un
@@ -28,7 +29,8 @@ on:
 # Trois portées, du moins cher au plus cher :
 #   configure   (défaut sur push/PR) : bootstrap + configuration des dépendances
 #   deps-smoke  : quelques dépendances réellement compilées pour arm64-ios
-#   full        : gate hôte + moteur iOS + app + .ipa
+#   engine      : + moteur arm64-ios, app et .ipa (sans la gate hôte)
+#   full        : tout, gate hôte comprise (elle exécute un slicing réel)
 #     gh workflow run ios.yml -f scope=deps-smoke
 #     gh workflow run ios.yml -f scope=full
 # ou, pour que chaque push lance tout : gh variable set QSID_FULL_CI --body true
@@ -78,11 +80,30 @@ jobs:
       - name: Outils
         run: brew install cmake ninja
 
+      - name: Cache des dépendances (iOS) — restauration
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-ios
+            build/dl-cache
+          key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+          restore-keys: |
+            deps-ios-${{ runner.arch }}-
+
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh
 
       - name: Dépendances ciblées pour iOS (smoke)
         run: QSID_TARGET=ios scripts/build-deps.sh smoke
+
+      - name: Cache des dépendances (iOS) — sauvegarde (même en cas d'échec)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/deps-ios
+            build/dl-cache
+          key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-${{ github.run_id }}
 
       - name: Journal du smoke
         if: failure()
@@ -113,13 +134,18 @@ jobs:
       - name: Outils
         run: brew install cmake ninja xcodegen
 
-      - name: Cache des dépendances (hôte)
-        uses: actions/cache@v4
+      - name: Cache des dépendances (hôte) — restauration
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/deps-host
             build/dl-cache
+          # La clé exacte sert au premier passage ; `restore-keys` rattrape les
+          # sauvegardes faites après un échec (clé suffixée par run_id), pour que
+          # chaque reprise reprenne le build au lieu de tout refaire.
           key: deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+          restore-keys: |
+            deps-host-${{ runner.arch }}-
 
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh
@@ -132,6 +158,15 @@ jobs:
 
       - name: Gate de slicing
         run: QSID_TARGET=host scripts/gate.sh
+
+      - name: Cache des dépendances (hôte) — sauvegarde (même en cas d'échec)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/deps-host
+            build/dl-cache
+          key: deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-${{ github.run_id }}
 
       - name: Journal du G-code produit
         if: always()
@@ -146,7 +181,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios-engine:
     needs: configure-check
-    if: ${{ inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    if: ${{ inputs.scope == 'full' || inputs.scope == 'engine' || vars.QSID_FULL_CI == 'true' }}
     runs-on: macos-15
     timeout-minutes: 360
     steps:
@@ -155,13 +190,15 @@ jobs:
       - name: Outils
         run: brew install cmake ninja
 
-      - name: Cache des dépendances (iOS)
-        uses: actions/cache@v4
+      - name: Cache des dépendances (iOS) — restauration
+        uses: actions/cache/restore@v4
         with:
           path: |
             build/deps-ios
             build/dl-cache
           key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+          restore-keys: |
+            deps-ios-${{ runner.arch }}-
 
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh
@@ -194,6 +231,15 @@ jobs:
           [ -n "$obj" ] || { echo "objet qidislice introuvable"; exit 1; }
           vtool -show-build "$obj" | sed 's/^/    /'
 
+      - name: Cache des dépendances (iOS) — sauvegarde (même en cas d'échec)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/deps-ios
+            build/dl-cache
+          key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-${{ github.run_id }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: engine-ios-arm64
@@ -207,7 +253,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios-app:
     needs: ios-engine
-    if: ${{ inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    if: ${{ inputs.scope == 'full' || inputs.scope == 'engine' || vars.QSID_FULL_CI == 'true' }}
     runs-on: macos-15
     timeout-minutes: 120
     steps:

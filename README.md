@@ -47,7 +47,8 @@ Pourquoi c'est plausible malgré tout :
    ```bash
    gh workflow run ios.yml -f scope=configure    # défaut (ce que fait un push)
    gh workflow run ios.yml -f scope=deps-smoke   # + quelques dépendances compilées pour arm64-ios
-   gh workflow run ios.yml -f scope=full         # tout : gate hôte, moteur iOS, app, .ipa
+   gh workflow run ios.yml -f scope=engine       # + moteur arm64-ios, app et .ipa
+   gh workflow run ios.yml -f scope=full         # tout, gate hôte comprise
    ```
    (ou `gh variable set QSID_FULL_CI --body true` pour que chaque push lance tout).
 3. `full` enchaîne : gate hôte → dépendances iOS (mises en cache) → moteur arm64 → app →
