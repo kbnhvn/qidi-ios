@@ -1,9 +1,25 @@
+diff --git a/deps/+z3/z3.cmake b/deps/+z3/z3.cmake
+index 81736d3..483d476 100644
+--- a/deps/+z3/z3.cmake
++++ b/deps/+z3/z3.cmake
+@@ -1,6 +1,11 @@
++# Cinq coquilles latentes de z3 4.13.0 (solveur LP) ne sont instanciées que dans
++# certaines configurations : AppleClang récent les refuse (no member named 'get',
++# 'get_value_of_column_cell', 'm_low_bound'...). Le patch ci-dessous les corrige ;
++# ExternalProject l'applique juste après l'extraction.
+ add_cmake_project(z3
+   URL https://github.com/Z3Prover/z3/archive/refs/tags/z3-4.13.0.zip
+   URL_HASH SHA256=81543736dcbbbcb037a7df55d0be596245d509f3f69f56610df32728e48ee050
++  PATCH_COMMAND ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/z3-lp-clang-typos.patch
+   CMAKE_ARGS
+     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+     -DZ3_INCLUDE_GIT_HASH=OFF
 diff --git a/deps/+z3/z3-lp-clang-typos.patch b/deps/+z3/z3-lp-clang-typos.patch
 new file mode 100644
-index 0000000..30bb917
+index 0000000..0ab5259
 --- /dev/null
 +++ b/deps/+z3/z3-lp-clang-typos.patch
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,50 @@
 +--- a/src/math/lp/static_matrix.h	2024-03-07 19:25:16.000000000 +0100
 ++++ b/src/math/lp/static_matrix.h	2026-10-18 02:04:22.388813269 +0200
 +@@ -79,7 +79,7 @@
@@ -26,19 +42,31 @@ index 0000000..30bb917
 +             (!m_upper_bound_is_set || m_upper_bound == c.m_upper_bound) &&
 +             m_cost == c.m_cost &&
 +             m_is_fixed == c.m_is_fixed &&
-diff --git a/deps/+z3/z3.cmake b/deps/+z3/z3.cmake
-index 81736d3..dba1941 100644
---- a/deps/+z3/z3.cmake
-+++ b/deps/+z3/z3.cmake
-@@ -1,6 +1,11 @@
-+# Deux coquilles latentes de z3 4.13.0 (solveur LP) ne sont instanciées que dans
-+# certaines configurations : AppleClang récent les refuse (no member named 'get',
-+# no member named 'm_low_bound'). Le patch ci-dessous les corrige ; il est appliqué
-+# par ExternalProject juste après l'extraction.
- add_cmake_project(z3
-   URL https://github.com/Z3Prover/z3/archive/refs/tags/z3-4.13.0.zip
-   URL_HASH SHA256=81543736dcbbbcb037a7df55d0be596245d509f3f69f56610df32728e48ee050
-+  PATCH_COMMAND ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/z3-lp-clang-typos.patch
-   CMAKE_ARGS
-     -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-     -DZ3_INCLUDE_GIT_HASH=OFF
++--- a/src/math/lp/static_matrix_def.h	2024-03-07 19:25:16.000000000 +0100
+++++ b/src/math/lp/static_matrix_def.h	2026-10-18 02:16:01.126663756 +0200
++@@ -87,12 +87,14 @@
++ // constructor that copies columns of the basis from A
++ template <typename T, typename X>
++ static_matrix<T, X>::static_matrix(static_matrix const &A, unsigned * /* basis */) :
++-    m_vector_of_row_offsets(A.column_count(), numeric_traits<T>::zero()) {
+++    // QIDISlicer-iOS : m_vector_of_row_offsets est un vector<int> ; y passer un
+++    // zéro de type T ne compile pas (convention du reste de la classe : -1).
+++    m_vector_of_row_offsets(A.column_count(), -1) {
++     unsigned m = A.row_count();
++     init_row_columns(m, m);
++     for (; m-- > 0; ) 
++         for (auto & col : A.m_columns[m]) 
++-            set(col.var(), m, A.get_value_of_column_cell(col));
+++            set(col.var(), m, A.get_val(col)); // QIDISlicer-iOS : get_value_of_column_cell -> get_val
++ }
++ 
++ template <typename T, typename X> void static_matrix<T, X>::clear() {
++@@ -138,7 +140,7 @@
++         auto & row = m_rows[it.var()];
++         unsigned offset = row.size() - 1;
++         for (auto row_it = row.rbegin(); row_it != row.rend(); row_it ++) {
++-            if (row_it.var() == j) {
+++            if ((*row_it).var() == j) { // QIDISlicer-iOS : l'iterateur z3 n'a pas operator->, on dereference
++                 row.erase(row.begin() + offset);
++                 break;
++             }
