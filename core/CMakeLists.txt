@@ -41,8 +41,15 @@ target_link_libraries(qidislice
 )
 
 if(APPLE)
-    # Mêmes dépendances système que la cible QIDISlicer amont.
-    target_link_libraries(qidislice PRIVATE "-liconv" "-framework IOKit" "-framework CoreFoundation" "-lc++")
+    # Mêmes dépendances système que la cible QIDISlicer amont, plus Foundation :
+    # libslic3r/MacUtils.mm utilise NSFileManager (classe Objective-C). L'app iOS
+    # lie Foundation de son côté ; le binaire de gate (CLI) en a besoin ici.
+    target_link_libraries(qidislice PRIVATE
+        "-liconv"
+        "-framework IOKit"
+        "-framework CoreFoundation"
+        "-framework Foundation"
+        "-lc++")
 endif()
 
 set_target_properties(qidislice PROPERTIES
