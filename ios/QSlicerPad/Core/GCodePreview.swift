@@ -32,6 +32,7 @@ struct GCodePreview {
 
         var layers: [Layer] = []
         var current = Layer()
+        var pendingLayerZ: Float?
         var x: Float = 0, y: Float = 0, z: Float = 0
         var absoluteE = true
         var lastE: Float = 0
@@ -43,15 +44,23 @@ struct GCodePreview {
 
         func flushLayer() {
             if !current.segments.isEmpty {
-                current.z = z
+                current.z = pendingLayerZ ?? z
                 layers.append(current)
                 current = Layer()
             }
+            pendingLayerZ = nil
         }
 
         func handle(_ line: Substring) {
             if line.hasPrefix(";LAYER_CHANGE") {
                 flushLayer()
+                return
+            }
+            // Le moteur émet la hauteur de couche juste après ;LAYER_CHANGE
+            // (« ;Z:0.2 »). C'est plus fiable que de suivre les mouvements Z
+            // (le générateur fait des sauts de Z entre les couches).
+            if line.hasPrefix(";Z:"), let value = Float(line.dropFirst(3)) {
+                pendingLayerZ = value
                 return
             }
             guard line.hasPrefix("G0") || line.hasPrefix("G1") else {

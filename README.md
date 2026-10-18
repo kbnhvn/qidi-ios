@@ -18,12 +18,12 @@ sans serveur et sans sous-processus (interdits par iOS).
 | App SwiftUI | **✅ compilée et liée** | `ios-app` vert, deux fois ; binaire **27 Mo**, `Mach-O arm64`, *platform IOS, minos 17.0* |
 | `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**7,9 Mo**), profils QIDI embarqués sous `qidi/profiles/` |
 | Série de patches iOS | **✅ 16 patches**, appliqués en séquence | `scripts/lint.sh` les rejoue à chaque exécution |
-| Gate de slicing à l'exécution (hôte macOS) | **⏳ prêt, non validé** | le job `host-gate` bute sur la facturation Actions (voir ci-dessous) ; il exerce désormais **les deux chemins** (API objet v2 + CLI v1) |
+| Gate de slicing à l'exécution (hôte macOS) | **✅ verte** (run `39122327213`) | cube 20 mm slicé par les deux chemins : CLI v1 → 100 couches / 1 397,9 mm ; API objet v2 (chemin de l'app) → 100 couches / 1 397,9 mm ; progression 10→90 % observée |
 | Slicing réel sur iPad | **⏳ à faire** | nécessite d'installer l'IPA (SideStore) |
 | Profils QIDI embarqués (24 imprimantes, 78 réglages, 858 filaments) | **🟡 résolution vérifiée localement** | chaînes `inherits` résolues sur le vrai bundle : `Q2 0.4 nozzle` → 94 clés, preset print → 188, filament → 89, fusion → 369 |
-| Progression + annulation du slicing | 🟡 écrit | ABI `qsid_slice_async` / `qsid_cancel` au-dessus de `Print::apply/process/export_gcode` |
-| Visualiseur 3D + aperçu G-code | 🟡 écrit | SceneKit ; G-code analysé en streaming, curseur de couche |
-| Envoi à l'imprimante (Moonraker) | 🟡 écrit | `URLSession` : upload `server/files/upload` + `printer/print/start` + état |
+| Progression + annulation du slicing | ✅ progression validée en gate ; annulation compilée | ABI `qsid_slice_async` / `qsid_cancel` au-dessus de `Print::apply/process/export_gcode` |
+| Visualiseur 3D + aperçu G-code | 🟡 compilé, non exercé | SceneKit ; G-code analysé en streaming, curseur de couche |
+| Envoi à l'imprimante (Moonraker) | 🟡 compilé, non exercé | `URLSession` : upload `server/files/upload` + `printer/print/start` + état |
 
 Autrement dit : **rien n'a encore été compilé ici** (l'environnement de rédaction est Linux, sans SDK
 Apple). Le premier passage de la CI est le point de vérité ; il est normal qu'il demande quelques

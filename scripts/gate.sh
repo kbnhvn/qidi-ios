@@ -35,6 +35,11 @@ QSID_DATA_DIR="$out/data" \
             "$out/cube_20mm.gcode" \
             --min-layers 20
 
+info "gate : placement sur le plateau (220x220 dans la config de test)"
+center=$(grep -o "CENTER=[0-9.-]*,[0-9.-]*" "$out/cube_20mm.gcode" | head -1)
+echo "    $center"
+"$QSID_ROOT/scripts/lib/check-center.py" "$center" 110 110 5
+
 info "gate : révision du G-code"
 grep -c "^G1" "$out/cube_20mm.gcode" >/dev/null || die "aucun mouvement G1 dans le G-code"
 grep -q "G28" "$QSID_BUILD/gate-out/cube_20mm.gcode" || echo "    (note : pas de G28 — le start-gcode générique est minimal)"

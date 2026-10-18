@@ -13,6 +13,7 @@
  */
 #include "qidislice.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -168,6 +169,37 @@ int qsid_slice_async(qsid_ctx *ctx,
         });
 
         Slic3r::Model model = Slic3r::FileReader::load_model(model_path);
+
+        // Placement : on centre le modèle sur le plateau et on le pose sur le lit.
+        // Sans cela, un STL importé reste à l'origine (constaté : cube imprimé au
+        // coin, avec des coordonnées négatives). L'arrange complet (nesting de
+        // plusieurs objets) viendra plus tard.
+        {
+            Slic3r::BoundingBoxf3 bbox;
+            for (const Slic3r::ModelObject *obj : model.objects)
+                for (size_t i = 0; i < obj->instances.size(); ++i)
+                    bbox.merge(obj->instance_bounding_box(i));
+
+            const Slic3r::Points bed = Slic3r::get_bed_shape(config);
+            if (bbox.defined && !bed.empty()) {
+                double minx = bed.front().x(), maxx = minx;
+                double miny = bed.front().y(), maxy = miny;
+                for (const Slic3r::Vec2d &p : bed) {
+                    minx = std::min(minx, p.x());
+                    maxx = std::max(maxx, p.x());
+                    miny = std::min(miny, p.y());
+                    maxy = std::max(maxy, p.y());
+                }
+                const Slic3r::Vec3d shift(
+                    (minx + maxx) / 2.0 - (bbox.min.x() + bbox.max.x()) / 2.0,
+                    (miny + maxy) / 2.0 - (bbox.min.y() + bbox.max.y()) / 2.0,
+                    0.0);
+                for (Slic3r::ModelObject *obj : model.objects)
+                    obj->translate_instances(shift);
+            }
+            for (Slic3r::ModelObject *obj : model.objects)
+                obj->ensure_on_bed(true);
+        }
 
         // On part de la configuration *complète* (toutes les clés existent), puis on
         // applique le profil : c'est la séquence de la CLI. Indispensable ici :
