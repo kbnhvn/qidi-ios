@@ -1,0 +1,29 @@
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index 125f869..4085588 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -95,6 +95,10 @@ if (APPLE)
+         "-DCMAKE_C_FLAGS=${DEP_WERRORS_SDK}"
+         "-DCMAKE_FIND_FRAMEWORK=LAST"
+         "-DCMAKE_FIND_APPBUNDLE=LAST"
++        # Plusieurs dépendances declarent encore cmake_minimum_required() < 3.5
++        # (Blosc, TBB 2021.5...) et CMake 4 refuse de configurer. Vaut pour macOS
++        # comme pour iOS : d'ou sa place ici, et non dans le bloc iOS plus bas.
++        "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+     )
+ 
+     # --- iOS ------------------------------------------------------------------
+@@ -110,12 +114,7 @@ if (APPLE)
+             # qui installent des outils en ligne de commande échouent alors en
+             # « no BUNDLE DESTINATION » (Qhull le premier, puis PNG/JPEG/Expat).
+             "-DCMAKE_MACOSX_BUNDLE=OFF"
+-            # Plusieurs dépendances déclarent encore cmake_minimum_required() < 3.5
+-            # (Eigen 3.3.7, par exemple) et CMake 4 refuse alors de configurer :
+-            # « Compatibility with CMake < 3.5 has been removed ». Cette variable
+-            # rétablit la tolérance. Les portages comparables épinglent CMake 3.31
+-            # pour la même raison — ceinture et bretelles.
+-            "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
++            # CMAKE_POLICY_VERSION_MINIMUM est posé plus haut (bloc APPLE commun).
+             # Le toolchain lit QSID_DEPS_PREFIX pour placer le préfixe des
+             # dépendances dans CMAKE_FIND_ROOT_PATH. Sans cette ligne, les
+             # sous-builds ne chercheraient que dans le SDK (modes *_MODE_*=ONLY) :
