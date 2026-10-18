@@ -11,14 +11,15 @@ sans serveur et sans sous-processus (interdits par iOS).
 
 ## État réel du projet
 
-| Élément | État | Vérifié comment |
+| Élément | État | Preuve |
 |---|---|---|
-| Série de patches iOS sur les sources QIDISlicer 1.2.5 | **écrite et applicable** | `git apply --check` sur la révision épinglée (`scripts/lint.sh`) |
-| Toolchain CMake iOS, scripts de build, gate de slicing | **écrits** | syntaxe shell + analyse CMake par harnais (`scripts/lint.sh`) |
-| ABI C du moteur (`core/include/qidislice.h`) | **écrite** | analyse CMake OK ; **pas encore compilée** |
-| App SwiftUI, XcodeGen, paquetage `.ipa` | **écrite** | **pas encore compilée** (nécessite Xcode) |
-| CI macOS (dépendances → moteur → app → `.ipa`) | **écrite** | première exécution = le vrai test |
-| Compilation réussie / G-code produit / app qui se lance | **à faire** | c'est ce que la CI va établir |
+| Dépendances cross-compilées (Boost, TBB, CGAL, OpenVDB, Blosc, z3, GMP/MPFR, Qhull, PNG/JPEG, Expat, heatshrink, LibBGCode, NLopt, Eigen, Cereal) | **✅ compilées pour arm64-iphoneos** | job `ios-engine` vert ; toutes les archives `lipo` = arm64, `vtool` = *platform IOS, minos 15.0* |
+| Moteur `libslic3r` + ABI C | **✅ compilés et liés** | `Cœur (iOS arm64)` vert ; archive fusionnée de **136 Mo** ; symboles `qsid_*` présents |
+| App SwiftUI | **✅ compilée et liée** | `ios-app` vert, deux fois ; binaire **27 Mo**, `Mach-O arm64`, *platform IOS, minos 17.0* |
+| `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**7,9 Mo**), profils QIDI embarqués sous `qidi/profiles/` |
+| Série de patches iOS | **✅ 16 patches**, appliqués en séquence | `scripts/lint.sh` les rejoue à chaque exécution |
+| Gate de slicing à l'exécution (hôte macOS) | **⏳ prêt, non validé** | le job `host-gate` bute sur la facturation Actions (voir ci-dessous) ; patch `0016` non encore rejoué |
+| Slicing réel sur iPad | **⏳ à faire** | nécessite d'installer l'IPA (SideStore) |
 
 Autrement dit : **rien n'a encore été compilé ici** (l'environnement de rédaction est Linux, sans SDK
 Apple). Le premier passage de la CI est le point de vérité ; il est normal qu'il demande quelques
@@ -51,9 +52,17 @@ Pourquoi c'est plausible malgré tout :
    gh workflow run ios.yml -f scope=full         # tout, gate hôte comprise
    ```
    (ou `gh variable set QSID_FULL_CI --body true` pour que chaque push lance tout).
-3. `full` enchaîne : gate hôte → dépendances iOS (mises en cache) → moteur arm64 → app →
-   **`QSlicerPad-unsigned.ipa`** en artefact.
+3. `engine` puis `full` enchaînent : moteur arm64 → app → **`QSlicerPad-unsigned.ipa`** en artefact
+   (`full` ajoute la gate hôte, qui exécute un slicing réel sur macOS).
 4. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
+
+> **Quota Actions.** Les runners macOS comptent **×10** en minutes. Mesuré sur ce projet :
+> `configure` ≈ 15 s, `deps-smoke` ≈ 1 min, `engine` (moteur + app + IPA, cache chaud) ≈ 5 min,
+> premier passage à froid ≈ 10 min, `host-gate` ≈ 10 min. Au-delà du quota inclus, GitHub refuse de
+> démarrer les jobs : *« recent account payments have failed or your spending limit needs to be
+> increased »*. Deux issues : relever la limite de dépense, ou rendre le dépôt **public** (les minutes
+> des runners standard sont alors gratuites — cohérent avec l'AGPL, qui impose déjà la publication du
+> source).
 
 ## Construction locale (macOS requis)
 

@@ -71,7 +71,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deps-smoke:
     needs: configure-check
-    if: ${{ inputs.scope == 'deps-smoke' || inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    if: ${{ inputs.scope == 'deps-smoke' }}
     runs-on: macos-15
     timeout-minutes: 90
     steps:
