@@ -9,8 +9,16 @@
 
 set(QSID_CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/qidislice.cpp)
 
+# SLIC3R_CLI_SOURCES est défini par src/CMakeLists.txt avec des chemins *relatifs à
+# src/* (ex. CLI/PrintHelp.cpp). Depuis ios-core/, il faut les préfixer, sinon CMake
+# les cherche ici et échoue (« Cannot find source file: QIDISlicer.hpp »).
+set(_qsid_cli_sources "")
+foreach(_src IN LISTS SLIC3R_CLI_SOURCES)
+    list(APPEND _qsid_cli_sources "${CMAKE_CURRENT_SOURCE_DIR}/../src/${_src}")
+endforeach()
+
 # Bibliothèque statique : c'est elle que l'app iPadOS lie.
-add_library(qidislice STATIC ${QSID_CORE_SOURCES} ${SLIC3R_CLI_SOURCES})
+add_library(qidislice STATIC ${QSID_CORE_SOURCES} ${_qsid_cli_sources})
 
 target_include_directories(qidislice PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Les sources CLI/QIDISlicer.hpp s'incluent relativement à src/.
