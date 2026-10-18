@@ -170,6 +170,18 @@ int qsid_slice_async(qsid_ctx *ctx,
 
         Slic3r::Model model = Slic3r::FileReader::load_model(model_path);
 
+        Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
+        if (config_path && *config_path) {
+            Slic3r::DynamicPrintConfig user_config;
+            // Substitutions tolérées silencieusement (options inconnues d'une version
+            // à l'autre), comme la CLI desktop.
+            user_config.load_from_ini(config_path, Slic3r::ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
+            config.apply(user_config);
+        }
+
+        // apply() renvoie APPLY_STATUS_UNCHANGED / CHANGED / INVALIDATED : aucun
+        // n'est une erreur (INVALIDATED = il faudra recalculer, ce que fait notre
+        // process() juste après).
         // Placement : on centre le modèle sur le plateau et on le pose sur le lit.
         // Sans cela, un STL importé reste à l'origine (constaté : cube imprimé au
         // coin, avec des coordonnées négatives). L'arrange complet (nesting de
@@ -205,18 +217,6 @@ int qsid_slice_async(qsid_ctx *ctx,
         // applique le profil : c'est la séquence de la CLI. Indispensable ici :
         // GCodeGenerator::_do_export lit par exemple `binary_gcode` sans garde, et
         // déréférence un pointeur nul si la clé manque (SIGSEGV constaté).
-        Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
-        if (config_path && *config_path) {
-            Slic3r::DynamicPrintConfig user_config;
-            // Substitutions tolérées silencieusement (options inconnues d'une version
-            // à l'autre), comme la CLI desktop.
-            user_config.load_from_ini(config_path, Slic3r::ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
-            config.apply(user_config);
-        }
-
-        // apply() renvoie APPLY_STATUS_UNCHANGED / CHANGED / INVALIDATED : aucun
-        // n'est une erreur (INVALIDATED = il faudra recalculer, ce que fait notre
-        // process() juste après).
         print.apply(model, config);
 
         if (ctx->cancel_requested.load()) {
