@@ -26,6 +26,14 @@ else
     toolchain_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${QSID_MACOS_MIN}")
 fi
 
+asan_args=()
+if [ "${QSID_ASAN:-0}" = "1" ] && [ "$QSID_TARGET" = "host" ]; then
+    # Diagnostique la gate : ASan symbolise les SIGSEGV que lldb ne peut pas
+    # dérouler (libslic3r est compilé -O3, sans frame pointer).
+    asan_args+=(-DSLIC3R_ASAN=ON "-DCMAKE_CXX_FLAGS=-g -fno-omit-frame-pointer")
+    info "ASan activé pour la gate hôte"
+fi
+
 info "cœur : configure ($QSID_TARGET)"
 cmake -S "$QSID_SRC" -B "$QSID_ENGINE_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
@@ -38,7 +46,7 @@ cmake -S "$QSID_SRC" -B "$QSID_ENGINE_BUILD" -G Ninja \
     -DSLIC3R_BUILD_SANDBOXES=OFF \
     -DSLIC3R_PCH=OFF \
     -DSLIC3R_ENABLE_FORMAT_STEP=OFF \
-    ${toolchain_args[@]+"${toolchain_args[@]}"}
+    ${toolchain_args[@]+"${toolchain_args[@]}"} ${asan_args[@]+"${asan_args[@]}"}
 
 targets=(libslic3r qidislice)
 if [ "${1:-}" = "gate" ] && [ "$QSID_TARGET" = "host" ]; then

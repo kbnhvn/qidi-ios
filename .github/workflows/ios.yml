@@ -154,6 +154,10 @@ jobs:
         run: QSID_TARGET=host scripts/build-deps.sh
 
       - name: Cœur + gate (hôte)
+        # ASan : la gate est un banc de test, pas un livrable ; il symbolise les
+        # SIGSEGV du moteur (compilé -O3, donc sans pile exploitable sous lldb).
+        env:
+          QSID_ASAN: "1"
         run: QSID_TARGET=host scripts/build-engine.sh gate
 
       - name: Gate de slicing
