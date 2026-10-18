@@ -266,6 +266,85 @@ jobs:
             build/dist-ios/QSlicerEngine-link.txt
 
   # ---------------------------------------------------------------------------
+  # 2bis. Vérification visuelle : build simulateur (arm64-simulator) + capture
+  #       d'écran de l'app lancée dans un simulateur iPad. C'est le seul contrôle
+  #       qui juge la disposition tactile sans appareil physique.
+  # ---------------------------------------------------------------------------
+  ui-snapshot:
+    needs: configure-check
+    if: ${{ inputs.scope == 'engine' || inputs.scope == 'full' || vars.QSID_FULL_CI == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Outils
+        run: brew install cmake ninja xcodegen
+
+      - name: Cache des dépendances (simulateur)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/deps-iossim
+            build/dl-cache
+          key: deps-iossim-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
+          restore-keys: |
+            deps-iossim-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-
+
+      - name: Sources amont
+        run: scripts/bootstrap.sh
+
+      - name: Dépendances (simulateur)
+        run: QSID_TARGET=iossim scripts/build-deps.sh
+
+      - name: Cœur (simulateur)
+        run: QSID_TARGET=iossim scripts/build-engine.sh
+
+      - name: Archive du moteur (simulateur)
+        run: QSID_TARGET=iossim scripts/package-engine.sh
+
+      - name: Ressources du bundle
+        run: scripts/stage-resources.sh
+
+      - name: Projet Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Construire pour le simulateur
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/QSlicerPad.xcodeproj \
+            -scheme QSlicerPad \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/xcode-sim \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            QSID_ENGINE_ARCHIVE="$PWD/build/dist-iossim" \
+            QSID_ENGINE_LINK_FLAGS="$(grep -v '^#' build/dist-iossim/QSlicerEngine-link.txt | tr '\n' ' ')" \
+            build | tee xcodebuild-sim.log | tail -30
+
+      - name: Capture d'écran (simulateur iPad)
+        run: |
+          set -euo pipefail
+          app=build/xcode-sim/Build/Products/Debug-iphonesimulator/QSlicerPad.app
+          scripts/simulator-snapshot.sh "$app" build/ui-snapshot-ipad.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-snapshot-ipad
+          path: build/ui-snapshot-ipad.png
+
+      - name: Journal xcodebuild simulateur (en cas d'échec)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-sim-log
+          path: xcodebuild-sim.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
   # 3. App : projet XcodeGen, build iOS, contrôles du bundle, .ipa non signée.
   # ---------------------------------------------------------------------------
   ios-app:
