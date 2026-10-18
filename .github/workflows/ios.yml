@@ -88,7 +88,7 @@ jobs:
             build/dl-cache
           key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
           restore-keys: |
-            deps-ios-${{ runner.arch }}-
+            deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-
 
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh
@@ -145,7 +145,7 @@ jobs:
           # chaque reprise reprenne le build au lieu de tout refaire.
           key: deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
           restore-keys: |
-            deps-host-${{ runner.arch }}-
+            deps-host-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-
 
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh
@@ -198,7 +198,7 @@ jobs:
             build/dl-cache
           key: deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}
           restore-keys: |
-            deps-ios-${{ runner.arch }}-
+            deps-ios-${{ runner.arch }}-${{ hashFiles('scripts/bootstrap.sh', 'patches/*.patch') }}-
 
       - name: Bootstrap des sources amont
         run: scripts/bootstrap.sh

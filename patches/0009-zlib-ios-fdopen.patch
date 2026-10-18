@@ -1,0 +1,22 @@
+diff --git a/deps/+ZLIB/0001-Respect-BUILD_SHARED_LIBS.patch b/deps/+ZLIB/0001-Respect-BUILD_SHARED_LIBS.patch
+index f176ce2..04a9b4f 100644
+--- a/deps/+ZLIB/0001-Respect-BUILD_SHARED_LIBS.patch
++++ b/deps/+ZLIB/0001-Respect-BUILD_SHARED_LIBS.patch
+@@ -49,3 +49,17 @@ Common subdirectories: ../zlib-1.2.11/test and ./test
+ Common subdirectories: ../zlib-1.2.11/watcom and ./watcom
+ Common subdirectories: ../zlib-1.2.11/win32 and ./win32
+ Only in ./: ZLIB.patch
++--- ../zlib-1.2.11/zutil.h	2017-01-15 18:29:40.000000000 +0100
+++++ ./zutil.h	2026-10-18 02:38:47.273624113 +0200
++@@ -130,7 +130,10 @@
++ #  endif
++ #endif
++ 
++-#if defined(MACOS) || defined(TARGET_OS_MAC)
+++/* QIDISlicer-iOS : TARGET_OS_MAC vaut 1 sur iOS aussi, alors que la branche
+++ * ci-dessous (MacOS classique) redéfinit fdopen et OS_CODE. Sur iOS, fdopen
+++ * existe : on restreint la branche à macOS. */
+++#if defined(MACOS) || (defined(TARGET_OS_MAC) && !TARGET_OS_IPHONE)
++ #  define OS_CODE  7
++ #  ifndef Z_SOLO
++ #    if defined(__MWERKS__) && __dest_os != __be_os && __dest_os != __win32_os
