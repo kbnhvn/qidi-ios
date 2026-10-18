@@ -304,10 +304,14 @@ jobs:
           [ "$archs" = "arm64" ]
           vtool -show-build "$app/QSlicerPad" | sed 's/^/    /'
           # Le moteur est réellement dans le binaire : chaîne de version de l'amont.
-          strings "$app/QSlicerPad" | grep -q "QIDISlicer-"
-          # Profils vendor embarqués (XcodeGen les copie à la racine du bundle).
-          test -f "$app/qidi/profiles/QIDITechnology.ini"
-          ls "$app/qidi/profiles" | head -5
+          # (grep -q fermerait le tube trop tôt -> SIGPIPE dans strings avec pipefail)
+          n=$(strings "$app/QSlicerPad" | grep -c "QIDISlicer-")
+          echo "chaînes de version du moteur : $n"
+          [ "$n" -gt 0 ]
+          # Profils vendor embarqués, avec leur arborescence.
+          ini=$(find "$app" -name QIDITechnology.ini | head -1)
+          [ -n "$ini" ] || { echo "profils QIDI absents du bundle"; find "$app" -maxdepth 3 -type d | head -20; exit 1; }
+          echo "profils : ${ini#$app/}"
           du -sh "$app"
 
       - name: Paqueter la .ipa non signée

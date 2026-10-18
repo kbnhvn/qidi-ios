@@ -33,6 +33,14 @@ targets:
       - path: QSlicerPad
         excludes:
           - "Resources/Info.plist"
+          - "Resources/qidi"
+      # Les profils vendor doivent conserver leur arborescence dans le bundle
+      # (l'app les cherche via Bundle.main ... subdirectory: "qidi/profiles").
+      # Une « folder reference » les copie tels quels ; listés fichier par fichier,
+      # Xcode les aplatirait à la racine de l'app.
+      - path: QSlicerPad/Resources/qidi
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_NAME: QSlicerPad
