@@ -28,6 +28,12 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/GCode/ThumbnailData.hpp"
+#include "libslic3r/BuildVolume.hpp"
+#include "libslic3r/MultipleBeds.hpp"
+#include "libslic3r/Model.hpp"
+// Place les objets sur le plateau (wrapper fourni par la cible slic3r-arrange-wrapper,
+// que la CLI amont utilise aussi).
+#include <arrange-wrapper/ModelArrange.hpp>
 #include "libslic3r_version.h" // généré par la compilation amont (SLIC3R_APP_NAME/VERSION)
 // Slic3r::CLI::run() est déclaré dans QIDISlicer.hpp (pas dans CLI/CLI.hpp) :
 // c'est le point d'entrée que le main() du binaire desktop appelle.
@@ -182,44 +188,42 @@ int qsid_slice_async(qsid_ctx *ctx,
         // apply() renvoie APPLY_STATUS_UNCHANGED / CHANGED / INVALIDATED : aucun
         // n'est une erreur (INVALIDATED = il faudra recalculer, ce que fait notre
         // process() juste après).
-        // Placement : on centre le modèle sur le plateau et on le pose sur le lit.
-        // Sans cela, un STL importé reste à l'origine (constaté : cube imprimé au
-        // coin, avec des coordonnées négatives). L'arrange complet (nesting de
-        // plusieurs objets) viendra plus tard.
+        // Préparation du modèle : même séquence que la CLI amont (qui est la
+        // référence qui fonctionne). Sans elle, l'export G-code plantait sur un
+        // contour dégénéré (ASan : set_object_range -> Polygon::douglas_peucker).
         {
-            Slic3r::BoundingBoxf3 bbox;
-            for (const Slic3r::ModelObject *obj : model.objects)
-                for (size_t i = 0; i < obj->instances.size(); ++i)
-                    bbox.merge(obj->instance_bounding_box(i));
+            // 1) placement sur le plateau (gère aussi plusieurs objets)
+            arr2::ArrangeBed      bed = arr2::to_arrange_bed(Slic3r::get_bed_shape(config));
+            arr2::ArrangeSettings arrange_cfg;
+            arrange_cfg.set_distance_from_objects(Slic3r::min_object_distance(config));
+            Slic3r::arrange_objects(model, bed, arrange_cfg);
 
-            const Slic3r::Points bed = Slic3r::get_bed_shape(config);
-            if (bbox.defined && !bed.empty()) {
-                // `Points` contient des Point (coordonnées entières) : on repasse en
-                // double explicitement (Eigen refuse de mélanger les types).
-                double minx = static_cast<double>(bed.front().x()), maxx = minx;
-                double miny = static_cast<double>(bed.front().y()), maxy = miny;
-                for (const Slic3r::Point &p : bed) {
-                    minx = std::min(minx, static_cast<double>(p.x()));
-                    maxx = std::max(maxx, static_cast<double>(p.x()));
-                    miny = std::min(miny, static_cast<double>(p.y()));
-                    maxy = std::max(maxy, static_cast<double>(p.y()));
-                }
-                const Slic3r::Vec3d shift(
-                    (minx + maxx) / 2.0 - (bbox.min.x() + bbox.max.x()) / 2.0,
-                    (miny + maxy) / 2.0 - (bbox.min.y() + bbox.max.y()) / 2.0,
-                    0.0);
-                for (Slic3r::ModelObject *obj : model.objects)
-                    obj->translate_instances(shift);
+            // 2) un extrudeur par volume (sinon les volumes n'en ont aucun)
+            for (Slic3r::ModelObject *mo : model.objects)
+                print.auto_assign_extruders(mo);
+
+            // 3) état « dans/hors volume d'impression » + un seul plateau
+            auto *bed_opt = dynamic_cast<const Slic3r::ConfigOptionPoints *>(config.option("bed_shape"));
+            if (bed_opt != nullptr) {
+                Slic3r::Pointfs bed_shape = bed_opt->values;
+                Slic3r::BuildVolume build_volume(bed_shape, config.opt_float("max_print_height"));
+                Slic3r::s_multiple_beds.update_build_volume(Slic3r::BoundingBoxf(bed_shape));
+                model.update_print_volume_state(build_volume);
             }
-            for (Slic3r::ModelObject *obj : model.objects)
-                obj->ensure_on_bed(true);
         }
 
-        // On part de la configuration *complète* (toutes les clés existent), puis on
-        // applique le profil : c'est la séquence de la CLI. Indispensable ici :
-        // GCodeGenerator::_do_export lit par exemple `binary_gcode` sans garde, et
-        // déréférence un pointeur nul si la clé manque (SIGSEGV constaté).
-        print.apply(model, config);
+        Slic3r::MultipleBedsUtils::with_single_bed_model_fff(model, 0, [&print, &model, &config]() {
+            print.apply(model, config);
+        });
+
+        if (const std::string validation = print.validate(); !validation.empty()) {
+            set_err(err_msg, err_len, validation);
+            return QSID_ERR_SLICE_FAILED;
+        }
+        if (print.empty()) {
+            set_err(err_msg, err_len, "nothing to print: the model is empty or outside the print volume");
+            return QSID_ERR_SLICE_FAILED;
+        }
 
         if (ctx->cancel_requested.load()) {
             set_err(err_msg, err_len, "canceled");
