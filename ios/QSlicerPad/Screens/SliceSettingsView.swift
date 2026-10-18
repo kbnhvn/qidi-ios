@@ -77,12 +77,14 @@ struct SliceSettingsView: View {
                     .disabled(!model.overrides.enabled)
                 }
 
-                Section(L10n.t("Température")) {
+                Section {
                     Stepper(value: $model.overrides.nozzleDelta, in: -20...20, step: 5) {
                         LabeledContent(L10n.t("Buse"),
                                        value: String(format: "%+d °C", model.overrides.nozzleDelta))
                     }
                     .disabled(!model.overrides.enabled)
+                } header: {
+                    Text(L10n.t("Température"))
                 } footer: {
                     Text(L10n.t("Le décalage s'ajoute à la température du filament du profil (utile pour un filament qui coule ou qui sous-extrude)."))
                 }
