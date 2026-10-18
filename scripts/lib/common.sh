@@ -32,13 +32,15 @@ QSID_ENGINE_BUILD="$QSID_BUILD/engine-$QSID_TARGET"
 QSID_DIST="$QSID_BUILD/dist-$QSID_TARGET"
 
 # Paquets de dépendances qu'on ne construit pas pour iOS :
-# - wxWidgets, GLEW, OpenCSG, NanoSVG : uniquement utilisés par la GUI (wxWidgets) ;
+# - wxWidgets, GLEW, OpenCSG : uniquement utilisés par la GUI (wxWidgets) ;
 #   le cœur libslic3r n'en dépend pas et wxOSX n'a pas de portage iOS.
 # - Catch2 : tests désactivés (cross-compilation).
 # - CURL, OpenSSL : référencés uniquement par src/slic3r (réseau/GUI). Le
 #   portage de QIDIConnect/Moonraker en v2 les ramènera (avec un patch OpenSSL).
 # - OCCT : import STEP, exclu de la v1 (SLIC3R_ENABLE_FORMAT_STEP=OFF).
-QSID_DEPS_EXCLUDES="${QSID_DEPS_EXCLUDES:-wxWidgets|GLEW|OpenCSG|NanoSVG|Catch2|CURL|OpenSSL|OCCT}"
+# - NanoSVG n'est PAS exclu : libslic3r/EmbossShape.hpp inclut nanosvg/nanosvg.h
+#   (embossage de texte) — ses en-têtes arrivent via <prefix>/include.
+QSID_DEPS_EXCLUDES="${QSID_DEPS_EXCLUDES:-wxWidgets|GLEW|OpenCSG|Catch2|CURL|OpenSSL|OCCT}"
 
 die()  { echo "erreur: $*" >&2; exit 1; }
 info() { echo "==> $*"; }

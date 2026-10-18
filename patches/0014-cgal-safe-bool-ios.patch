@@ -1,0 +1,50 @@
+diff --git a/deps/+CGAL/CGAL.cmake b/deps/+CGAL/CGAL.cmake
+index bb6e8fd..4169c92 100644
+--- a/deps/+CGAL/CGAL.cmake
++++ b/deps/+CGAL/CGAL.cmake
+@@ -5,6 +5,10 @@ add_cmake_project(
+     # For whatever reason, this keeps downloading forever (repeats downloads if finished)
+     URL      https://github.com/CGAL/cgal/archive/refs/tags/v5.4.zip
+     URL_HASH SHA256=d7605e0a5a5ca17da7547592f6f6e4a59430a0bc861948974254d0de43eab4c0
++    # CGAL 5.4 : trois « safe bool » appellent this->base() dans des classes sans
++    # classe de base (code mort presente jusqu'a CGAL 5.6). Le marqueur de validite
++    # est le pointeur g ; voir le patch pour le detail.
++    PATCH_COMMAND ${PATCH_CMD} ${CMAKE_CURRENT_LIST_DIR}/cgal-safe-bool-ios.patch
+ )
+ 
+ include(GNUInstallDirs)
+diff --git a/deps/+CGAL/cgal-safe-bool-ios.patch b/deps/+CGAL/cgal-safe-bool-ios.patch
+new file mode 100644
+index 0000000..8c7f126
+--- /dev/null
++++ b/deps/+CGAL/cgal-safe-bool-ios.patch
+@@ -0,0 +1,29 @@
++--- a/BGL/include/CGAL/boost/graph/iterator.h.orig	2026-10-18 03:14:29.237826151 +0200
+++++ b/BGL/include/CGAL/boost/graph/iterator.h	2026-10-18 03:14:29.264998281 +0200
++@@ -221,7 +221,7 @@
++ 
++   operator bool_type() const
++   {
++-    return (! (this->base() == nullptr)) ?
+++    return (! (this->g == nullptr)) ?
++       &Halfedge_around_source_iterator::this_type_does_not_support_comparisons : 0;
++   }
++ 
++@@ -321,7 +321,7 @@
++ 
++   operator bool_type() const
++   {
++-    return (! (this->base() == nullptr)) ?
+++    return (! (this->g == nullptr)) ?
++       &Halfedge_around_target_iterator::this_type_does_not_support_comparisons : 0;
++   }
++ 
++@@ -420,7 +420,7 @@
++ 
++   operator bool_type() const
++   {
++-    return (! (this->base() == nullptr)) ?
+++    return (! (this->g == nullptr)) ?
++       &Halfedge_around_face_iterator::this_type_does_not_support_comparisons : 0;
++   }
++ 
