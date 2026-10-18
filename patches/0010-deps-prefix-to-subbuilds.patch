@@ -1,0 +1,16 @@
+diff --git a/deps/CMakeLists.txt b/deps/CMakeLists.txt
+index 9b0391f..125f869 100644
+--- a/deps/CMakeLists.txt
++++ b/deps/CMakeLists.txt
+@@ -116,6 +116,11 @@ if (APPLE)
+             # rétablit la tolérance. Les portages comparables épinglent CMake 3.31
+             # pour la même raison — ceinture et bretelles.
+             "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
++            # Le toolchain lit QSID_DEPS_PREFIX pour placer le préfixe des
++            # dépendances dans CMAKE_FIND_ROOT_PATH. Sans cette ligne, les
++            # sous-builds ne chercheraient que dans le SDK (modes *_MODE_*=ONLY) :
++            # constaté sur runner, Boost et heatshrink « introuvables ».
++            "-DQSID_DEPS_PREFIX=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}"
+             # Ni CMAKE_FIND_ROOT_PATH ni les modes *_MODE_* ne sont passés ici : une
+             # liste contenant des ';' ne survit pas à la double expansion de
+             # CMAKE_ARGS (constaté sur runner : la valeur part en arguments
