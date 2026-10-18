@@ -25,6 +25,8 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/FileReader.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/GCode/ThumbnailData.hpp"
 #include "libslic3r_version.h" // généré par la compilation amont (SLIC3R_APP_NAME/VERSION)
 // Slic3r::CLI::run() est déclaré dans QIDISlicer.hpp (pas dans CLI/CLI.hpp) :
 // c'est le point d'entrée que le main() du binaire desktop appelle.
@@ -167,11 +169,17 @@ int qsid_slice_async(qsid_ctx *ctx,
 
         Slic3r::Model model = Slic3r::FileReader::load_model(model_path);
 
-        Slic3r::DynamicPrintConfig config;
+        // On part de la configuration *complète* (toutes les clés existent), puis on
+        // applique le profil : c'est la séquence de la CLI. Indispensable ici :
+        // GCodeGenerator::_do_export lit par exemple `binary_gcode` sans garde, et
+        // déréférence un pointeur nul si la clé manque (SIGSEGV constaté).
+        Slic3r::DynamicPrintConfig config = Slic3r::DynamicPrintConfig::full_print_config();
         if (config_path && *config_path) {
-            // Les substitutions (options inconnues d'une version à l'autre) sont
-            // tolérées silencieusement : c'est ce que fait la CLI desktop.
-            config.load_from_ini(config_path, Slic3r::ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
+            Slic3r::DynamicPrintConfig user_config;
+            // Substitutions tolérées silencieusement (options inconnues d'une version
+            // à l'autre), comme la CLI desktop.
+            user_config.load_from_ini(config_path, Slic3r::ForwardCompatibilitySubstitutionRule::EnableSystemSilent);
+            config.apply(user_config);
         }
 
         // apply() renvoie APPLY_STATUS_UNCHANGED / CHANGED / INVALIDATED : aucun
@@ -190,7 +198,12 @@ int qsid_slice_async(qsid_ctx *ctx,
             return QSID_ERR_CANCELED;
         }
 
-        print.export_gcode(out_gcode, nullptr /* GCodeProcessorResult */);
+        // Liste de vignettes vide : l'app affiche son propre aperçu, et cela évite
+        // tout chemin qui appellerait un callback nul (assertions désactivées en Release).
+        Slic3r::ThumbnailsGeneratorCallback thumbnails = [](const Slic3r::ThumbnailsParams &) {
+            return Slic3r::ThumbnailsList{};
+        };
+        print.export_gcode(out_gcode, nullptr /* GCodeProcessorResult */, thumbnails);
 
         {
             std::lock_guard<std::mutex> lock(ctx->print_mutex);
