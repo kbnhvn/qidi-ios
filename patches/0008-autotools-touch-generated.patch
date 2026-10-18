@@ -1,5 +1,5 @@
 diff --git a/deps/+GMP/GMP.cmake b/deps/+GMP/GMP.cmake
-index 8d96266..b98beb4 100644
+index 8d96266..3ad4c9c 100644
 --- a/deps/+GMP/GMP.cmake
 +++ b/deps/+GMP/GMP.cmake
 @@ -85,6 +85,12 @@ else ()
@@ -15,8 +15,20 @@ index 8d96266..b98beb4 100644
          # gmplib.org est régulièrement injoignable depuis un runner (timeout
          # status 28 constaté). ExternalProject essaie chaque URL dans l'ordre ;
          # le URL_HASH ci-dessous reste la preuve qu'on obtient le bon fichier.
+@@ -95,7 +101,10 @@ else ()
+         DOWNLOAD_DIR ${${PROJECT_NAME}_DEP_DOWNLOAD_DIR}/GMP
+         BUILD_IN_SOURCE ON 
+         CONFIGURE_COMMAND  env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ${_gmp_env_args} ./configure ${_cross_compile_arg} ${_gmp_conf_args} --enable-shared=no --enable-cxx=yes --enable-static=yes "--prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX}" ${_gmp_build_tgt}
+-        BUILD_COMMAND     make -j
++        # makeinfo/texi2* absents du runner : la documentation se croit à
++        # régénérer (version.texi réécrit par configure, plus récent que
++        # mpfr.info livré) et l'étape échoue. On neutralise ces outils.
++        BUILD_COMMAND     make -j MAKEINFO=true TEXI2DVI=true TEXI2PDF=true TEXI2HTML=true
+         INSTALL_COMMAND   make install
+     )
+ endif ()
 diff --git a/deps/+MPFR/MPFR.cmake b/deps/+MPFR/MPFR.cmake
-index 5e87360..4a549a4 100644
+index 5e87360..2c77bac 100644
 --- a/deps/+MPFR/MPFR.cmake
 +++ b/deps/+MPFR/MPFR.cmake
 @@ -29,6 +29,12 @@ else ()
@@ -32,3 +44,15 @@ index 5e87360..4a549a4 100644
          #URL http://ftp.vim.org/ftp/gnu/mpfr/mpfr-3.1.6.tar.bz2 https://www.mpfr.org/mpfr-3.1.6/mpfr-3.1.6.tar.bz2  # mirrors are allowed
          #URL_HASH SHA256=cf4f4b2d80abb79e820e78c8077b6725bbbb4e8f41896783c899087be0e94068
          # Dépôt principal fragile, comme pour GMP : miroirs GNU vérifiés
+@@ -40,7 +46,10 @@ else ()
+         DOWNLOAD_DIR ${${PROJECT_NAME}_DEP_DOWNLOAD_DIR}/MPFR
+         BUILD_IN_SOURCE ON
+         CONFIGURE_COMMAND env "CFLAGS=${_gmp_ccflags}" "CXXFLAGS=${_gmp_ccflags}" ./configure ${_cross_compile_arg} --prefix=${${PROJECT_NAME}_DEP_INSTALL_PREFIX} --enable-shared=no --enable-static=yes --with-gmp=${${PROJECT_NAME}_DEP_INSTALL_PREFIX} ${_gmp_build_tgt}
+-        BUILD_COMMAND make -j
++        # makeinfo/texi2* absents du runner : la documentation se croit à
++        # régénérer (version.texi réécrit par configure, plus récent que
++        # mpfr.info livré) et l'étape échoue. On neutralise ces outils.
++        BUILD_COMMAND make -j MAKEINFO=true TEXI2DVI=true TEXI2PDF=true TEXI2HTML=true
+         INSTALL_COMMAND make install
+     )
+ endif ()
