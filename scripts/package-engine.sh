@@ -19,9 +19,15 @@ require_macos
 mkdir -p "$QSID_DIST/include" "$QSID_DIST/lib"
 
 # Toutes les archives produites dans l'arbre amont et par nos cibles…
-mapfile -t engine_archives < <(find "$QSID_ENGINE_BUILD" -name '*.a' -type f | sort)
+# (pas de `mapfile` : macOS livre bash 3.2, où il n'existe pas.)
+engine_archives=()
+while IFS= read -r f; do engine_archives+=("$f"); done \
+    < <(find "$QSID_ENGINE_BUILD" -name '*.a' -type f | sort)
+
 # …et toutes celles installées par les dépendances.
-mapfile -t dep_archives < <(find "$QSID_DEPS_PREFIX/lib" -maxdepth 1 -name '*.a' -type f | sort)
+dep_archives=()
+while IFS= read -r f; do dep_archives+=("$f"); done \
+    < <(find "$QSID_DEPS_PREFIX/lib" -maxdepth 1 -name '*.a' -type f | sort)
 
 [ ${#engine_archives[@]} -gt 0 ] || die "aucune archive dans $QSID_ENGINE_BUILD"
 

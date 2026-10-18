@@ -101,6 +101,16 @@ if [ -n "$cmake_bin" ]; then
     rm -rf "$probe"
 fi
 
+echo "--- compatibilité bash 3.2 (macOS livre /bin/bash 3.2)"
+bash4_hits="$(grep -rnE "mapfile|readarray|declare -A" "$QSID_ROOT/scripts" --include="*.sh" \
+    | grep -v "/lint.sh:" || true)"
+if [ -z "$bash4_hits" ]; then
+    ok "aucune construction bash 4+ dans les scripts"
+else
+    bad "construction bash 4+ détectée :"
+    printf '%s\n' "$bash4_hits" | sed 's/^/    /'
+fi
+
 echo "--- divers"
 if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
     ok "testdata/cube_20mm.stl (12 facettes)"
