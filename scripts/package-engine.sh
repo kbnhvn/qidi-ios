@@ -33,7 +33,7 @@ while IFS= read -r f; do dep_archives+=("$f"); done \
 
 info "fusion : ${#engine_archives[@]} archive(s) du moteur + ${#dep_archives[@]} du préfixe deps"
 libtool -static -o "$QSID_DIST/lib/QSlicerEngine.a" \
-    "${engine_archives[@]}" "${dep_archives[@]}" 2>&1 | tail -3
+    ${engine_archives[@]+"${engine_archives[@]}"} ${dep_archives[@]+"${dep_archives[@]}"} 2>&1 | tail -3
 
 cp "$QSID_ROOT/core/include/qidislice.h" "$QSID_DIST/include/"
 

@@ -22,6 +22,8 @@ if [ "$QSID_TARGET" != "host" ]; then
         -DQSID_HOST_CC="$QSID_BUILD/host-tools/cc"
         -DQSID_HOST_CXX="$QSID_BUILD/host-tools/cxx"
     )
+else
+    toolchain_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${QSID_MACOS_MIN}")
 fi
 
 info "cœur : configure ($QSID_TARGET)"
@@ -36,7 +38,7 @@ cmake -S "$QSID_SRC" -B "$QSID_ENGINE_BUILD" -G Ninja \
     -DSLIC3R_BUILD_SANDBOXES=OFF \
     -DSLIC3R_PCH=OFF \
     -DSLIC3R_ENABLE_FORMAT_STEP=OFF \
-    "${toolchain_args[@]}"
+    ${toolchain_args[@]+"${toolchain_args[@]}"}
 
 targets=(libslic3r qidislice)
 if [ "${1:-}" = "gate" ] && [ "$QSID_TARGET" = "host" ]; then

@@ -24,6 +24,7 @@ esac
 
 QSID_ARCH="${QSID_ARCH:-arm64}"
 QSID_IOS_MIN="${QSID_IOS_MIN:-15.0}"
+QSID_MACOS_MIN="${QSID_MACOS_MIN:-11.0}"  # builds hôte (gate)
 QSID_JOBS="${QSID_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
 
 QSID_DEPS_BUILD="$QSID_BUILD/deps-$QSID_TARGET"

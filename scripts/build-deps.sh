@@ -25,6 +25,10 @@ if [ "$QSID_TARGET" != "host" ]; then
         -DQSID_HOST_CC="$QSID_BUILD/host-tools/cc"
         -DQSID_HOST_CXX="$QSID_BUILD/host-tools/cxx"
     )
+else
+    # Sur macOS, le superbuild amont exige une cible de déploiement (il l'infère
+    # sinon du sysroot, absent dans un build natif).
+    toolchain_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${QSID_MACOS_MIN}")
 fi
 
 info "deps : configure ($QSID_TARGET, SDK=$QSID_SDK)"
@@ -33,7 +37,7 @@ cmake -S "$QSID_SRC/deps" -B "$QSID_DEPS_BUILD" -G Ninja \
     "-DQIDISlicer_deps_PACKAGE_EXCLUDES=$QSID_DEPS_EXCLUDES" \
     "-DQIDISlicer_deps_DEP_INSTALL_PREFIX=$QSID_DEPS_PREFIX" \
     "-DQIDISlicer_deps_DEP_DOWNLOAD_DIR=$QSID_BUILD/dl-cache" \
-    "${toolchain_args[@]}"
+    ${toolchain_args[@]+"${toolchain_args[@]}"}
 
 # `scripts/build-deps.sh configure` : s'arrêter après la configuration. Quelques
 # minutes, et c'est là que se révèlent les erreurs de patches/outillage, avant les
