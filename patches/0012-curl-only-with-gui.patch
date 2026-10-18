@@ -1,0 +1,40 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 09ac488..21983e3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -450,19 +450,24 @@ slic3r_remap_configs(TBB::tbbmalloc RelWithDebInfo Release)
+ # The Intel TBB library will use the std::exception_ptr feature of C++11.
+ # add_definitions(-DTBB_USE_CAPTURED_EXCEPTION=0)
+ 
+-find_package(CURL REQUIRED)
++# CURL n'est utilise que par la couche GUI (src/slic3r/Utils/Http.cpp) : ni
++# libslic3r ni les sources CLI n'en dependent (verifie : aucun include <curl/...>).
++# En build sans GUI (iOS, headless) l'exiger inutilement bloquait la configuration.
++if (SLIC3R_GUI)
++    find_package(CURL REQUIRED)
+ 
+-add_library(libcurl INTERFACE)
+-target_link_libraries(libcurl INTERFACE CURL::libcurl)
++    add_library(libcurl INTERFACE)
++    target_link_libraries(libcurl INTERFACE CURL::libcurl)
+ 
+-# Fixing curl's cmake config script bugs
+-if (NOT WIN32)
+-    # Required by libcurl
+-    find_package(ZLIB REQUIRED)
+-    target_link_libraries(libcurl INTERFACE ZLIB::ZLIB)
+-else()
+-    target_link_libraries(libcurl INTERFACE crypt32)
+-endif()
++    # Fixing curl's cmake config script bugs
++    if (NOT WIN32)
++        # Required by libcurl
++        find_package(ZLIB REQUIRED)
++        target_link_libraries(libcurl INTERFACE ZLIB::ZLIB)
++    else()
++        target_link_libraries(libcurl INTERFACE crypt32)
++    endif()
++endif ()
+ 
+ ## OPTIONAL packages
+ 
