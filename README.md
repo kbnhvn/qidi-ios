@@ -16,7 +16,7 @@ sans serveur et sans sous-processus (interdits par iOS).
 | Dépendances cross-compilées (Boost, TBB, CGAL, OpenVDB, Blosc, z3, GMP/MPFR, Qhull, PNG/JPEG, Expat, heatshrink, LibBGCode, NLopt, Eigen, Cereal) | **✅ compilées pour arm64-iphoneos** | job `ios-engine` vert ; toutes les archives `lipo` = arm64, `vtool` = *platform IOS, minos 15.0* |
 | Moteur `libslic3r` + ABI C | **✅ compilés et liés** | `Cœur (iOS arm64)` vert ; archive fusionnée de **136 Mo** ; symboles `qsid_*` présents |
 | App SwiftUI | **✅ compilée et liée** | `ios-app` vert, deux fois ; binaire **27 Mo**, `Mach-O arm64`, *platform IOS, minos 17.0* |
-| `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**8,0 Mo**, 0.2.0 build 2), profils QIDI embarqués sous `qidi/profiles/`, icônes compilées |
+| `.ipa` non signée | **✅ produite** | artefact `QSlicerPad-unsigned-ipa` (**8,4 Mo**, 0.3.0 build 3), profils QIDI embarqués sous `qidi/profiles/`, icônes compilées |
 | Série de patches iOS | **✅ 16 patches**, appliqués en séquence | `scripts/lint.sh` les rejoue à chaque exécution |
 | Gate de slicing à l'exécution (hôte macOS) | **✅ verte** (run `39130857606`) | cube 20 mm slicé par les deux chemins : CLI v1 et API objet v2 (chemin de l'app) → **G-code identique octet pour octet** (8 100 lignes, 100 couches, 1 397,9 mm), objet centré, progression 10→90 % |
 | Slicing réel sur iPad | **⏳ à faire** | nécessite d'installer l'IPA (SideStore) |
@@ -59,6 +59,7 @@ Pourquoi c'est plausible malgré tout :
 3. `engine` puis `full` enchaînent : moteur arm64 → app → **`QSlicerPad-unsigned.ipa`** en artefact
    (`full` ajoute la gate hôte, qui exécute un slicing réel sur macOS).
 4. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
+- Recette pas-à-pas sur l'appareil : `docs/recette-ipad.md`
 
 > **Quota Actions.** Les runners macOS comptent **×10** en minutes. Mesuré sur ce projet :
 > `configure` ≈ 15 s, `deps-smoke` ≈ 1 min, `engine` (moteur + app + IPA, cache chaud) ≈ 5 min,
