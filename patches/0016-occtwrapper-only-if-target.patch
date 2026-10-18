@@ -1,0 +1,18 @@
+diff --git a/src/libslic3r/CMakeLists.txt b/src/libslic3r/CMakeLists.txt
+index ebf8c99..e23382a 100644
+--- a/src/libslic3r/CMakeLists.txt
++++ b/src/libslic3r/CMakeLists.txt
+@@ -641,8 +641,12 @@ target_link_libraries(libslic3r PUBLIC
+     libseqarrange
+ )
+ 
+-if (APPLE)
++if (APPLE AND TARGET OCCTWrapper)
+     # TODO: we need to fix notarization with the separate shared library
++    # QIDISlicer : la cible OCCTWrapper n'existe que si l'import STEP est compilé
++    # (SLIC3R_ENABLE_FORMAT_STEP=ON). Sans ce garde, un build Apple avec STEP
++    # désactivé produisait '-lOCCTWrapper' sur la ligne de liens et échouait
++    # ('library OCCTWrapper not found') — constaté sur le build hôte.
+     target_link_libraries(libslic3r PUBLIC OCCTWrapper)
+ endif ()
+ 
