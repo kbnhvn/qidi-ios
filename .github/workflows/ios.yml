@@ -159,6 +159,19 @@ jobs:
       - name: Gate de slicing
         run: QSID_TARGET=host scripts/gate.sh
 
+      - name: Backtrace en cas d'échec de la gate (lldb)
+        if: failure()
+        run: |
+          bin=$(find build/engine-host -name qidislice_gate -type f | head -1 || true)
+          [ -n "$bin" ] || { echo "binaire de gate introuvable"; exit 0; }
+          export QSID_RESOURCES_DIR="$PWD/third_party/qidislicer/resources"
+          export QSID_DATA_DIR="$PWD/build/gate-out/data"
+          echo "=== lldb : $bin"
+          xcrun lldb --batch -o run -o "bt all" -- "$bin" \
+            "$PWD/testdata/cube_20mm.stl" \
+            "$PWD/testdata/qidi_generic_fff.ini" \
+            "$PWD/build/gate-out/crash.gcode" 2>&1 | tail -80
+
       - name: Cache des dépendances (hôte) — sauvegarde (même en cas d'échec)
         if: always()
         uses: actions/cache/save@v4
