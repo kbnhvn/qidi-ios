@@ -103,17 +103,8 @@ struct MoonrakerClient {
         let (data, response) = try await send(req)
         try Self.validate(response, data)
 
-        struct Reply: Decodable {
-            struct Result: Decodable {
-                struct PrintStats: Decodable { let state: String? }
-                struct DisplayStatus: Decodable { let progress: Double? }
-                let print_stats: PrintStats?
-                let display_status: DisplayStatus?
-            }
-            let result: Result?
-            struct Status: Decodable { let print_stats: PrintStats? }
-        }
-        // La réponse est { "result": { "status": { "print_stats": {...}, ... } } }
+        // La réponse est { "result": { "status": { "print_stats": {...}, ... } } } :
+        // on la lit sans modèle Decodable (deux niveaux de clés dynamiques).
         if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let result = object["result"] as? [String: Any],
            let status = result["status"] as? [String: Any] {

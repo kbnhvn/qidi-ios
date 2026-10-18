@@ -20,7 +20,6 @@ struct GCodePreview {
     }
 
     private(set) var layers: [Layer] = []
-    private(set) var maxSegmentsPerLayer: Int = 200_000
     let bounds: (min: SIMD2<Float>, max: SIMD2<Float>)
 
     /// Parse un G-code en streaming (le fichier n'est jamais chargé entièrement).
