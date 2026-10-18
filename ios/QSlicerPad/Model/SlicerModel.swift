@@ -22,6 +22,11 @@ final class SlicerModel: ObservableObject {
     /// Profil importé (export du bureau) : prioritaire sur le bundle si présent.
     @Published private(set) var importedProfile: URL?
 
+    /// Réglages de slicing (supports, adhérence…) appliqués par-dessus le preset.
+    @Published var overrides = SliceOverrides() {
+        didSet { persistOverrides() }
+    }
+
     // MARK: Modèle et résultat
 
     @Published private(set) var importedModel: URL?
@@ -97,6 +102,7 @@ final class SlicerModel: ObservableObject {
         static let print = "qsid.print"
         static let filament = "qsid.filament"
         static let moonraker = "qsid.moonraker"
+        static let overrides = "qsid.overrides"
     }
 
     // MARK: Cycle de vie
@@ -105,6 +111,7 @@ final class SlicerModel: ObservableObject {
         catalog = QIDIProfileCatalog.load()
         restoreSelection()
         restoreMoonraker()
+        restoreOverrides()
 
         do {
             core = try SlicerCore(resourcesDirectory: resourcesDirectory, dataDirectory: dataDirectory)
@@ -122,7 +129,8 @@ final class SlicerModel: ObservableObject {
         if let importedProfile { return importedProfile.lastPathComponent }
         if hasEmbeddedProfiles && !selectedPrinter.isEmpty {
             let filament = selectedFilament.isEmpty ? "" : " / \(selectedFilament)"
-            return "\(selectedPrinter) · \(selectedPrint)\(filament)"
+            let suffix = overrides.enabled ? " · options perso" : ""
+            return "\(selectedPrinter) · \(selectedPrint)\(filament)\(suffix)"
         }
         return "Configuration générique embarquée (dépannage)"
     }
@@ -153,6 +161,17 @@ final class SlicerModel: ObservableObject {
         d.set(selectedPrinter, forKey: DefaultsKey.printer)
         d.set(selectedPrint, forKey: DefaultsKey.print)
         d.set(selectedFilament, forKey: DefaultsKey.filament)
+    }
+
+    private func restoreOverrides() {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.overrides),
+              let saved = try? JSONDecoder().decode(SliceOverrides.self, from: data) else { return }
+        overrides = saved
+    }
+
+    private func persistOverrides() {
+        guard let data = try? JSONEncoder().encode(overrides) else { return }
+        UserDefaults.standard.set(data, forKey: DefaultsKey.overrides)
     }
 
     private func restoreMoonraker() {
@@ -288,6 +307,7 @@ final class SlicerModel: ObservableObject {
                 try catalog.writeConfig(printer: selectedPrinter,
                                         print: selectedPrint,
                                         filament: selectedFilament.isEmpty ? nil : selectedFilament,
+                                        overrides: overrides,
                                         to: url)
                 config = url
             }

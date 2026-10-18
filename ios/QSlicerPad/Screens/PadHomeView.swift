@@ -17,6 +17,7 @@ struct PadHomeView: View {
     @State private var isImportingProfile = false
     @State private var showSettings = false
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var showSliceSettings = false
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -47,6 +48,10 @@ struct PadHomeView: View {
             .navigationTitle(model.importedModel?.lastPathComponent ?? L10n.t("Modèle"))
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    // Accessible même si la barre latérale est masquée.
+                    Button { showSliceSettings = true } label: {
+                        Label(L10n.t("Options de slicing…"), systemImage: "slider.horizontal.3")
+                    }
                     Button { isImportingModel = true } label: {
                         Label(L10n.t("Importer un modèle…"), systemImage: "square.and.arrow.down")
                     }
@@ -57,6 +62,9 @@ struct PadHomeView: View {
         .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $showSettings) {
             SettingsView().environmentObject(model)
+        }
+        .sheet(isPresented: $showSliceSettings) {
+            SliceSettingsView().environmentObject(model)
         }
         .modifier(DocumentImportModifiers(isImportingModel: $isImportingModel,
                                           isImportingProfile: $isImportingProfile))

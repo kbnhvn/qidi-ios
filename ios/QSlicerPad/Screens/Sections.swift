@@ -25,6 +25,8 @@ struct ProfileSection: View {
     @ObservedObject var model: SlicerModel
     @Binding var isImportingProfile: Bool
 
+    @State private var showSliceSettings = false
+
     var body: some View {
         Section {
             if model.hasEmbeddedProfiles {
@@ -51,6 +53,23 @@ struct ProfileSection: View {
 
             LabeledContent(L10n.t("Profil actif"), value: model.activeProfileLabel)
 
+            // Accès direct aux réglages de slicing (supports, adhérence, remplissage…).
+            Button { showSliceSettings = true } label: {
+                HStack {
+                    Label(L10n.t("Options de slicing…"), systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .frame(minHeight: 44)
+            }
+            .sheet(isPresented: $showSliceSettings) {
+                SliceSettingsView().environmentObject(model)
+            }
+
+            if let summary = model.overrides.summary {
+                Text(summary).font(.footnote).foregroundStyle(.secondary)
+            }
+
             Button {
                 isImportingProfile = true
             } label: {
@@ -76,17 +95,23 @@ struct ModelSection: View {
     @ObservedObject var model: SlicerModel
     @Binding var isImportingModel: Bool
 
+    /// Le visualiseur s'ouvre en feuille : pas de navigation poussée dont on ne
+    /// peut plus revenir (bouton « Terminé » toujours présent).
+    @State private var showViewer = false
+
     var body: some View {
         Section(L10n.t("Modèle")) {
             if let url = model.importedModel {
                 LabeledContent(L10n.t("Fichier"), value: url.lastPathComponent)
-                if let mesh = model.mesh {
-                    NavigationLink {
-                        ViewerScreen(content: .model(mesh))
-                            .navigationTitle(L10n.t("Modèle"))
-                    } label: {
+                if model.mesh != nil {
+                    Button { showViewer = true } label: {
                         Label(L10n.t("Voir en 3D"), systemImage: "cube.transparent")
                             .frame(minHeight: 44)
+                    }
+                    .sheet(isPresented: $showViewer) {
+                        if let mesh = model.mesh {
+                            NavigationStack { ViewerScreen(content: .model(mesh)) }
+                        }
                     }
                 }
             } else {
@@ -162,6 +187,8 @@ struct ResultSection: View {
     @ObservedObject var model: SlicerModel
     let output: SlicerModel.SliceOutput
 
+    @State private var showPreview = false
+
     var body: some View {
         Section(L10n.t("Résultat")) {
             LabeledContent("G-code", value: output.url.lastPathComponent)
@@ -170,13 +197,15 @@ struct ResultSection: View {
             LabeledContent(L10n.t("Taille"), value: ByteCountFormatter.string(fromByteCount: output.sizeBytes, countStyle: .file))
             LabeledContent(L10n.t("Durée"), value: String(format: "%.1f s", output.seconds))
 
-            if let preview = model.preview {
-                NavigationLink {
-                    ViewerScreen(content: .gcode(preview))
-                        .navigationTitle(L10n.t("Aperçu G-code"))
-                } label: {
+            if model.preview != nil {
+                Button { showPreview = true } label: {
                     Label(L10n.t("Aperçu G-code"), systemImage: "square.stack.3d.up")
                         .frame(minHeight: 44)
+                }
+                .sheet(isPresented: $showPreview) {
+                    if let preview = model.preview {
+                        NavigationStack { ViewerScreen(content: .gcode(preview)) }
+                    }
                 }
             }
             ShareLink(item: output.url) {

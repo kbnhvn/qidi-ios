@@ -188,8 +188,13 @@ struct QIDIProfileCatalog {
     }
 
     /// Écrit la configuration résolue dans un fichier .ini temporaire.
-    func writeConfig(printer: String, print: String, filament: String?, to url: URL) throws {
-        let config = resolvedConfig(printer: printer, print: print, filament: filament)
+    /// `overrides` (réglages utilisateur) a la priorité sur le preset.
+    func writeConfig(printer: String, print: String, filament: String?,
+                     overrides: SliceOverrides = SliceOverrides(), to url: URL) throws {
+        var config = resolvedConfig(printer: printer, print: print, filament: filament)
+        for (key, value) in overrides.configEntries(basedOn: config) {
+            config[key] = value
+        }
         guard !config.isEmpty else {
             throw NSError(domain: "QSlicerPad", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "Profil introuvable dans le bundle embarqué."
