@@ -13,6 +13,8 @@ struct QSlicerPadApp: App {
         WindowGroup {
             HomeView()
                 .environmentObject(model)
+                // Reconstruit l'interface quand la langue change dans les réglages.
+                .id(model.languageVersion)
         }
     }
 }

@@ -1,10 +1,7 @@
 //
 //  SlicerModel.swift
-//  État de l'app : fichier importé, profil, exécution du slicing.
-//
-//  Le slicing se fait *dans le processus* (ABI C) — pas de serveur, pas de
-//  sous-processus. Tout est local : les seuls fichiers écrits le sont dans le
-//  conteneur de l'app.
+//  État de l'app : profils, modèle importé, slicing (avec progression et
+//  annulation), aperçu, envoi à l'imprimante.
 //
 
 import Foundation
@@ -13,15 +10,22 @@ import SwiftUI
 @MainActor
 final class SlicerModel: ObservableObject {
 
-    // MARK: Sortie publiée
+    // MARK: Profils
 
-    @Published private(set) var catalog = QIDIProfileCatalog(printerModels: [], vendorName: nil)
-    @Published var selectedPrinter: String = ""
+    @Published private(set) var catalog = QIDIProfileCatalog(sections: [:], vendorName: nil)
+    @Published var selectedPrinter: String = "" {
+        didSet { if selectedPrinter != oldValue { selectedPrint = catalog.printPresets(for: selectedPrinter).first ?? "" } }
+    }
+    @Published var selectedPrint: String = ""
+    @Published var selectedFilament: String = ""
+    /// Profil importé (export du bureau) : prioritaire sur le bundle si présent.
     @Published private(set) var importedProfile: URL?
+
+    // MARK: Modèle et résultat
+
     @Published private(set) var importedModel: URL?
-    @Published private(set) var isSlicing = false
-    @Published private(set) var statusLine: String?
-    @Published private(set) var errorMessage: String?
+    @Published private(set) var mesh: STLMesh?
+    @Published private(set) var preview: GCodePreview?
     @Published private(set) var output: SliceOutput?
 
     struct SliceOutput: Identifiable {
@@ -33,17 +37,32 @@ final class SlicerModel: ObservableObject {
         let seconds: Double
     }
 
+    /// Incrémenté quand la langue change : l'interface est reconstruite.
+    @Published var languageVersion = 0
+
+    // MARK: Exécution
+
+    @Published private(set) var isSlicing = false
+    @Published private(set) var progress: Double = 0
+    @Published private(set) var progressText: String = ""
+    @Published private(set) var statusLine: String?
+    @Published private(set) var errorMessage: String?
+
+    // MARK: Imprimante (Moonraker)
+
+    @Published var moonraker: MoonrakerConfig = MoonrakerConfig() {
+        didSet { persistMoonraker() }
+    }
+    @Published private(set) var isUploading = false
+    @Published private(set) var uploadStatus: String?
+
     // MARK: Chemins
 
-    /// Ressources du cœur (profils vendor), dans le bundle.
     private let resourcesDirectory: URL = {
-        if let url = Bundle.main.resourceURL?.appendingPathComponent("qidi") {
-            return url
-        }
-        return URL(fileURLWithPath: NSTemporaryDirectory())
+        Bundle.main.resourceURL?.appendingPathComponent("qidi")
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
     }()
 
-    /// Répertoire inscriptible du conteneur, pour les caches/config du cœur.
     private let dataDirectory: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
@@ -52,7 +71,6 @@ final class SlicerModel: ObservableObject {
         return dir
     }()
 
-    /// Exports visibles dans Fichiers (UIFileSharingEnabled).
     private let exportsDirectory: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let dir = docs.appendingPathComponent("Exports", isDirectory: true)
@@ -60,27 +78,28 @@ final class SlicerModel: ObservableObject {
         return dir
     }()
 
+    private let workDirectory: URL = {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qslicerpad", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
     private var core: SlicerCore?
 
-    /// Configuration générique embarquée, utilisée si aucun profil n'est importé.
-    var bundledGenericConfig: URL? {
-        Bundle.main.url(forResource: "qidi_generic_fff", withExtension: "ini", subdirectory: "qidi/generic")
-    }
-
-    var engineVersion: String { SlicerCore.version }
-
-    var activeProfile: URL? { importedProfile ?? bundledGenericConfig }
-
-    var activeProfileLabel: String {
-        if let importedProfile = importedProfile { return importedProfile.lastPathComponent }
-        return "Configuration générique embarquée (dépannage)"
+    private enum DefaultsKey {
+        static let printer = "qsid.printer"
+        static let print = "qsid.print"
+        static let filament = "qsid.filament"
+        static let moonraker = "qsid.moonraker"
     }
 
     // MARK: Cycle de vie
 
     init() {
         catalog = QIDIProfileCatalog.load()
-        if selectedPrinter.isEmpty { selectedPrinter = catalog.printerModels.first ?? "" }
+        restoreSelection()
+        restoreMoonraker()
+
         do {
             core = try SlicerCore(resourcesDirectory: resourcesDirectory, dataDirectory: dataDirectory)
         } catch {
@@ -88,14 +107,64 @@ final class SlicerModel: ObservableObject {
         }
     }
 
+    var engineVersion: String { SlicerCore.version }
+
+    var hasEmbeddedProfiles: Bool { !catalog.printers.isEmpty }
+
+    /// Configuration réellement utilisée : le profil importé, sinon les presets.
+    var activeProfileLabel: String {
+        if let importedProfile { return importedProfile.lastPathComponent }
+        if hasEmbeddedProfiles && !selectedPrinter.isEmpty {
+            let filament = selectedFilament.isEmpty ? "" : " / \(selectedFilament)"
+            return "\(selectedPrinter) · \(selectedPrint)\(filament)"
+        }
+        return "Configuration générique embarquée (dépannage)"
+    }
+
+    private var bundledGenericConfig: URL? {
+        Bundle.main.url(forResource: "qidi_generic_fff", withExtension: "ini", subdirectory: "qidi/generic")
+    }
+
+    // MARK: Sélection persistée
+
+    private func restoreSelection() {
+        let d = UserDefaults.standard
+        let printers = catalog.printers
+        let stored = d.string(forKey: DefaultsKey.printer)
+        selectedPrinter = (stored.flatMap { printers.contains($0) ? $0 : nil }) ?? printers.first ?? ""
+
+        let prints = catalog.printPresets(for: selectedPrinter)
+        let storedPrint = d.string(forKey: DefaultsKey.print)
+        selectedPrint = (storedPrint.flatMap { prints.contains($0) ? $0 : nil }) ?? prints.first ?? ""
+
+        let filaments = catalog.filamentPresets(for: selectedPrinter)
+        let storedFilament = d.string(forKey: DefaultsKey.filament)
+        selectedFilament = (storedFilament.flatMap { filaments.contains($0) ? $0 : nil }) ?? filaments.first ?? ""
+    }
+
+    func persistSelection() {
+        let d = UserDefaults.standard
+        d.set(selectedPrinter, forKey: DefaultsKey.printer)
+        d.set(selectedPrint, forKey: DefaultsKey.print)
+        d.set(selectedFilament, forKey: DefaultsKey.filament)
+    }
+
+    private func restoreMoonraker() {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.moonraker),
+              let config = try? JSONDecoder().decode(MoonrakerConfig.self, from: data) else { return }
+        moonraker = config
+    }
+
+    private func persistMoonraker() {
+        guard let data = try? JSONEncoder().encode(moonraker) else { return }
+        UserDefaults.standard.set(data, forKey: DefaultsKey.moonraker)
+    }
+
     // MARK: Import
 
-    /// Importe un fichier choisi par l'utilisateur dans le conteneur (les URL du
-    /// sélecteur sont éphémères : il faut copier).
     private func importFile(from url: URL, into directory: URL) throws -> URL {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let destination = directory.appendingPathComponent(url.lastPathComponent)
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -108,8 +177,11 @@ final class SlicerModel: ObservableObject {
     func importModel(from url: URL) {
         errorMessage = nil
         output = nil
+        preview = nil
         do {
-            importedModel = try importFile(from: url, into: dataDirectory.appendingPathComponent("models"))
+            let copy = try importFile(from: url, into: dataDirectory.appendingPathComponent("models"))
+            importedModel = copy
+            loadMesh(for: copy)
         } catch {
             errorMessage = "Import du modèle impossible : \(error.localizedDescription)"
         }
@@ -124,8 +196,36 @@ final class SlicerModel: ObservableObject {
         }
     }
 
-    func clearProfile() {
-        importedProfile = nil
+    func clearProfile() { importedProfile = nil }
+
+    // MARK: Aperçu du modèle
+
+    /// Charge un maillage pour le visualiseur. Un STL est lu directement ; pour
+    /// les autres formats, le moteur l'exporte en STL (in-process).
+    private func loadMesh(for model: URL) {
+        mesh = nil
+        let ext = model.pathExtension.lowercased()
+        if ext == "stl" {
+            if let loaded = try? STLLoader.load(url: model) { mesh = loaded; return }
+        }
+        guard let core else { return }
+        let stlURL = workDirectory.appendingPathComponent(model.deletingPathExtension().lastPathComponent + ".stl")
+        Task {
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do { try core.exportSTL(model: model, output: stlURL); continuation.resume() }
+                        catch { continuation.resume(throwing: error) }
+                    }
+                }
+                if let loaded = try? STLLoader.load(url: stlURL) {
+                    self.mesh = loaded
+                }
+            } catch {
+                // L'aperçu est un confort : ne pas masquer l'erreur de slicing.
+                print("aperçu indisponible : \(error.localizedDescription)")
+            }
+        }
     }
 
     // MARK: Slicing
@@ -139,15 +239,34 @@ final class SlicerModel: ObservableObject {
             errorMessage = "Le moteur de slicing n'est pas disponible."
             return
         }
+        guard !isSlicing else { return }
 
-        let output = exportsDirectory
+        var config = bundledGenericConfig
+        do {
+            if let importedProfile {
+                config = importedProfile
+            } else if hasEmbeddedProfiles, !selectedPrinter.isEmpty, !selectedPrint.isEmpty {
+                let url = workDirectory.appendingPathComponent("preset.ini")
+                try catalog.writeConfig(printer: selectedPrinter,
+                                        print: selectedPrint,
+                                        filament: selectedFilament.isEmpty ? nil : selectedFilament,
+                                        to: url)
+                config = url
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+
+        let outputURL = exportsDirectory
             .appendingPathComponent(model.deletingPathExtension().lastPathComponent)
             .appendingPathExtension("gcode")
 
         isSlicing = true
+        progress = 0
+        progressText = "Préparation…"
+        statusLine = nil
         errorMessage = nil
-        statusLine = "Slicing en cours… (le cœur n'expose pas encore de progression)"
-        let config = activeProfile
         let started = Date()
 
         Task {
@@ -155,20 +274,34 @@ final class SlicerModel: ObservableObject {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     DispatchQueue.global(qos: .userInitiated).async {
                         do {
-                            try core.slice(model: model, config: config, output: output)
+                            try core.slice(model: model, config: config, output: outputURL) { percent, text in
+                                Task { @MainActor in
+                                    if percent >= 0 { self.progress = Double(percent) / 100.0 }
+                                    self.progressText = text
+                                }
+                            }
                             continuation.resume()
                         } catch {
                             continuation.resume(throwing: error)
                         }
                     }
                 }
-                let stats = Self.inspect(gcode: output)
-                self.output = SliceOutput(url: output,
+
+                let elapsed = Date().timeIntervalSince(started)
+                let stats = Self.streamStats(gcode: outputURL)
+                self.output = SliceOutput(url: outputURL,
                                           lines: stats.lines,
                                           layers: stats.layers,
                                           sizeBytes: stats.bytes,
-                                          seconds: Date().timeIntervalSince(started))
-                self.statusLine = "Terminé en \(String(format: "%.1f", Date().timeIntervalSince(started))) s"
+                                          seconds: elapsed)
+                self.statusLine = "Terminé en \(String(format: "%.1f", elapsed)) s"
+                self.progress = 1
+                self.progressText = "Terminé"
+                self.preview = try? GCodePreview.parse(url: outputURL)
+            } catch SlicerCoreError.canceled {
+                self.statusLine = "Slicing annulé."
+                self.progress = 0
+                self.progressText = ""
             } catch {
                 self.errorMessage = error.localizedDescription
                 self.statusLine = nil
@@ -177,16 +310,85 @@ final class SlicerModel: ObservableObject {
         }
     }
 
-    private static func inspect(gcode url: URL) -> (lines: Int, layers: Int, bytes: Int64) {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return (0, 0, 0) }
-        defer { try? handle.close() }
-        let data = handle.readDataToEndOfFile()
-        var lines = 0
-        var layers = 0
-        data.split(separator: 0x0A).forEach { line in
-            lines += 1
-            if line.starts(with: Array(";LAYER_CHANGE".utf8)) { layers += 1 }
+    func cancel() {
+        core?.cancel()
+    }
+
+    /// Statistiques du G-code en *streaming* (un fichier peut faire des centaines de Mo).
+    private static func streamStats(gcode url: URL) -> (lines: Int, layers: Int, bytes: Int64) {
+        guard let stream = InputStream(url: url) else { return (0, 0, 0) }
+        stream.open()
+        defer { stream.close() }
+
+        var lines = 0, layers = 0, bytes: Int64 = 0
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        var atLineStart = true
+        var matched = 0
+        let needle = Array(";LAYER_CHANGE".utf8)
+
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 { break }
+            bytes += Int64(read)
+            for i in 0..<read {
+                let byte = buffer[i]
+                if atLineStart {
+                    if matched < needle.count && byte == needle[matched] {
+                        matched += 1
+                    } else {
+                        matched = (byte == needle[0]) ? 1 : 0
+                    }
+                    atLineStart = false
+                }
+                if byte == 0x0A {
+                    lines += 1
+                    atLineStart = true
+                    if matched == needle.count { layers += 1 }
+                    matched = 0
+                }
+            }
         }
-        return (lines, layers, Int64(data.count))
+        return (lines, layers, bytes)
+    }
+
+    // MARK: Envoi à l'imprimante
+
+    func uploadAndPrint() {
+        guard let output else { return }
+        guard moonraker.isConfigured else {
+            errorMessage = MoonrakerError.notConfigured.localizedDescription
+            return
+        }
+        isUploading = true
+        uploadStatus = "Envoi…"
+        errorMessage = nil
+
+        let client = MoonrakerClient(config: moonraker)
+        let file = output.url
+        Task {
+            do {
+                try await client.upload(file: file, filename: file.lastPathComponent)
+                self.uploadStatus = "Envoi terminé, démarrage…"
+                try await client.startPrint(filename: file.lastPathComponent)
+                self.uploadStatus = "Impression lancée."
+            } catch {
+                self.uploadStatus = nil
+                self.errorMessage = error.localizedDescription
+            }
+            self.isUploading = false
+        }
+    }
+
+    func refreshPrinterStatus() {
+        guard moonraker.isConfigured else { return }
+        let client = MoonrakerClient(config: moonraker)
+        Task {
+            do {
+                let status = try await client.status()
+                self.uploadStatus = "\(status.state) — \(Int(status.progress * 100)) %"
+            } catch {
+                self.uploadStatus = error.localizedDescription
+            }
+        }
     }
 }

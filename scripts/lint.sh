@@ -113,6 +113,47 @@ else
     printf '%s\n' "$bash4_hits" | sed 's/^/    /'
 fi
 
+echo "--- cohérence de l'ABI C (en-tête, implémentation, appels Swift)"
+abi_header="$QSID_ROOT/core/include/qidislice.h"
+abi_impl="$QSID_ROOT/core/src/qidislice.cpp"
+missing_impl=""
+for fn in $(grep -oE 'qsid_[a-z_]+\(' "$abi_header" | tr -d '(' | sort -u); do
+    grep -qE "\\b${fn}\\(" "$abi_impl" || missing_impl="$missing_impl $fn"
+done
+if [ -z "$missing_impl" ]; then
+    ok "chaque fonction déclarée a une implémentation"
+else
+    bad "déclarées mais absentes de qidislice.cpp :$missing_impl"
+fi
+
+missing_in_header=""
+for fn in $(grep -rhoE 'qsid_[a-z_]+\(' "$QSID_ROOT/ios" --include="*.swift" | tr -d '(' | sort -u); do
+    grep -qE "\\b${fn}\\(" "$abi_header" || missing_in_header="$missing_in_header $fn"
+done
+if [ -z "$missing_in_header" ]; then
+    ok "les appels Swift correspondent à l'en-tête"
+else
+    bad "appelés depuis Swift mais absents de l'en-tête :$missing_in_header"
+fi
+
+echo "--- clés de localisation (doublons = crash à l'exécution)"
+l10n="$QSID_ROOT/ios/QSlicerPad/Core/L10n.swift"
+if [ -f "$l10n" ]; then
+    if "$PY" - "$l10n" <<'EOF'
+import re, sys
+src = open(sys.argv[1]).read()
+body = src.split('private static let english: [String: String] = [',1)[1].rsplit(']',1)[0]
+keys = re.findall(r'^\s*"((?:[^"\\]|\\.)*)"\s*:', body, re.M)
+dupes = sorted({k for k in keys if keys.count(k) > 1})
+if dupes:
+    print("doublons :", dupes)
+    sys.exit(1)
+EOF
+    then ok "aucune clé en double ($(grep -c '":' "$l10n") entrées)"; else bad "clés en double dans L10n.swift"; fi
+else
+    skip "L10n" "fichier absent"
+fi
+
 echo "--- divers"
 if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
     ok "testdata/cube_20mm.stl (12 facettes)"

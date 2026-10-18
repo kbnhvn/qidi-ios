@@ -6,16 +6,12 @@
  * processus*, sans interface graphique et sans lancer de sous-processus
  * (interdits sous iOS).
  *
- * Contrat de la version 1 :
- *   - le slicing est synchrone et non annulable (voir « Limites » plus bas) ;
- *   - tous les appels sont sérialisés : le cœur libslic3r n'est pas réentrant,
- *     un seul appel à la fois par contexte ;
+ * Contrat :
+ *   - `qsid_slice_async()` est bloquant mais *rapporte la progression* et peut
+ *     être annulé depuis un autre thread (`qsid_cancel()`).
+ *   - tous les appels sont sérialisés : un seul slicing à la fois par contexte
+ *     (libslic3r n'est pas réentrant).
  *   - les chemins sont en UTF-8.
- *
- * Limites connues de la v1 (à lever en v2 via l'API libslic3r plutôt que la CLI) :
- *   - pas de progression ni d'annulation ;
- *   - la sortie texte du cœur n'est pas capturée (pas de callback de log) ;
- *   - les erreurs fatales du cœur peuvent terminer le processus.
  */
 #ifndef QIDISLICE_H
 #define QIDISLICE_H
@@ -35,40 +31,72 @@ extern "C" {
 /* Contexte opaque. Créé une fois au démarrage de l'app. */
 typedef struct qsid_ctx qsid_ctx;
 
-/* Code de retour commun aux fonctions de slicing. */
+/* Codes de retour communs. */
 enum {
     QSID_OK                = 0,
-    QSID_ERR_ARG           = 1,  /* argument invalide                        */
-    QSID_ERR_NO_CONTEXT    = 2,  /* contexte nul / non initialisé             */
-    QSID_ERR_IO            = 3,  /* fichier absent ou illisible               */
-    QSID_ERR_SLICE_FAILED  = 4   /* le cœur a échoué (voir err_msg)           */
+    QSID_ERR_ARG           = 1,  /* argument invalide                              */
+    QSID_ERR_NO_CONTEXT    = 2,  /* contexte nul / non initialisé                   */
+    QSID_ERR_IO            = 3,  /* fichier absent ou illisible                     */
+    QSID_ERR_SLICE_FAILED  = 4,  /* le cœur a échoué (voir err_msg)                 */
+    QSID_ERR_CANCELED      = 5,  /* annulé via qsid_cancel()                        */
+    QSID_ERR_BUSY          = 6   /* un slicing est déjà en cours sur ce contexte    */
 };
 
 /*
+ * Progression. Appelée depuis le thread de slicing, plusieurs fois par seconde.
+ * `percent` va de 0 à 100 (ou -1 si inconnu) ; `message` est en UTF-8 et ne vit
+ * que le temps de l'appel. L'hôte doit replanifier sur son thread principal.
+ */
+typedef void (*qsid_progress_cb)(int percent, const char *message, void *user);
+
+/*
  * Crée un contexte.
- *   resources_dir : racine des ressources QIDISlicer (profils QIDITechnology.ini,
- *                   etc.), à l'intérieur du bundle iOS. Peut être NULL.
- *   data_dir      : répertoire inscriptible (conteneur de l'app), utilisé par
- *                   le cœur pour ses caches/config. Peut être NULL.
- * Retourne NULL si l'initialisation du cœur échoue.
- * Le cœur ne doit être initialisé qu'une fois par processus.
+ *   resources_dir : racine des ressources QIDISlicer dans le bundle (lecture seule).
+ *   data_dir      : répertoire inscriptible (conteneur de l'app).
+ * Retourne NULL si l'initialisation échoue. Un seul contexte par processus.
  */
 QSID_EXPORT qsid_ctx *qsid_create(const char *resources_dir, const char *data_dir);
 
-/* Libère le contexte. À n'appeler qu'en fin de vie de l'app. */
+/* Libère le contexte (à n'appeler qu'en fin de vie de l'app). */
 QSID_EXPORT void qsid_destroy(qsid_ctx *ctx);
 
-/* Version du cœur, ex. "QIDISlicer 1.2.5 (libslic3r)". */
+/* Version du cœur, ex. "QIDISlicer 1.2.5". */
 QSID_EXPORT int qsid_version(char *buf, size_t buflen);
 
 /*
- * Slice `model_path` (STL, 3MF, OBJ, AMF, STEP si compilé) vers `out_gcode`.
+ * Slice `model_path` (STL, 3MF, OBJ, AMF) vers `out_gcode`, via l'API objet
+ * libslic3r (Print::process + export_gcode). Bloquant ; progression via `cb` ;
+ * interruption via qsid_cancel() depuis un autre thread.
+ *
  *   config_path : fichier .ini de configuration (format PrusaSlicer/QIDISlicer).
- *                 Peut être NULL ou vide : les valeurs par défaut du cœur sont
- *                 alors utilisées, ce qui n'est PAS un profil d'imprimante
- *                 utilisable — passer un profil.
- *   out_gcode   : chemin du G-code à produire (écrasé s'il existe).
- *   err_msg/err_len : tampon recevant un message d'erreur (peut être NULL).
+ *                 Peut être NULL : les valeurs par défaut du cœur sont alors
+ *                 utilisées — ce n'est PAS un profil d'imprimante utilisable.
+ */
+QSID_EXPORT int qsid_slice_async(qsid_ctx *ctx,
+                                 const char *model_path,
+                                 const char *config_path,
+                                 const char *out_gcode,
+                                 qsid_progress_cb cb, void *user,
+                                 char *err_msg, size_t err_len);
+
+/*
+ * Demande l'annulation du slicing en cours. Thread-safe, sans effet si rien ne
+ * tourne. `qsid_slice_async()` renvoie alors QSID_ERR_CANCELED.
+ */
+QSID_EXPORT void qsid_cancel(qsid_ctx *ctx);
+
+/*
+ * Exporte un modèle vers un STL binaire (utile au visualiseur : un 3MF/OBJ/AMF
+ * devient un STL que l'app peut afficher). Utilise la CLI du cœur (in-process).
+ */
+QSID_EXPORT int qsid_export_stl(qsid_ctx *ctx,
+                                const char *model_path,
+                                const char *out_stl,
+                                char *err_msg, size_t err_len);
+
+/*
+ * v1 conservées : appel direct de Slic3r::CLI::run() (sans progression), et
+ * slicing synchrone qui en dépend. Utiles pour `--query-printer-models` & co.
  */
 QSID_EXPORT int qsid_slice(qsid_ctx *ctx,
                            const char *model_path,
@@ -76,12 +104,6 @@ QSID_EXPORT int qsid_slice(qsid_ctx *ctx,
                            const char *out_gcode,
                            char *err_msg, size_t err_len);
 
-/*
- * Échappatoire : construit et exécute une ligne de commande du cœur,
- * exactement comme l'exécutable `qidi-slicer`. `argv` ne doit PAS contenir le
- * nom du programme (il est ajouté). Utile pour `--query-printer-models`,
- * `--export-3mf`, etc. depuis l'app.
- */
 QSID_EXPORT int qsid_run_cli(qsid_ctx *ctx,
                              int argc, const char *const *argv,
                              char *err_msg, size_t err_len);

@@ -19,13 +19,21 @@ fi
 out="$QSID_BUILD/gate-out"
 mkdir -p "$out"
 
-info "gate : cube 20 mm → G-code"
+info "gate : cube 20 mm → G-code (chemin v2 : API objet + progression)"
 QSID_RESOURCES_DIR="$QSID_SRC/resources" \
 QSID_DATA_DIR="$out/data" \
     "$gate" "$QSID_ROOT/testdata/cube_20mm.stl" \
             "$QSID_ROOT/testdata/qidi_generic_fff.ini" \
             "$out/cube_20mm.gcode" \
             --min-layers 20
+
+info "gate : même cube par le chemin v1 (CLI), pour non-régression"
+QSID_RESOURCES_DIR="$QSID_SRC/resources" \
+QSID_DATA_DIR="$out/data" \
+    "$gate" "$QSID_ROOT/testdata/cube_20mm.stl" \
+            "$QSID_ROOT/testdata/qidi_generic_fff.ini" \
+            "$out/cube_20mm-legacy.gcode" \
+            --min-layers 20 --legacy
 
 info "gate : révision du G-code"
 grep -c "^G1" "$out/cube_20mm.gcode" >/dev/null || die "aucun mouvement G1 dans le G-code"

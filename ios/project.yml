@@ -48,6 +48,7 @@ targets:
         INFOPLIST_FILE: QSlicerPad/Resources/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # ABI C du moteur
         SWIFT_OBJC_BRIDGING_HEADER: QSlicerPad/Support/QSlicerPad-Bridging-Header.h
         HEADER_SEARCH_PATHS:

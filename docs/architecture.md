@@ -8,7 +8,8 @@
 │   écran, import de fichiers, état de l'app, partage du G-code        │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ABI C étroite — core/include/qidislice.h                             │
-│   qsid_create / qsid_slice / qsid_run_cli / qsid_version             │
+│   qsid_create / qsid_slice_async / qsid_cancel / qsid_export_stl     │
+│   qsid_slice + qsid_run_cli (v1, CLI) — v2 : API objet libslic3r     │
 ├──────────────────────────────────────────────────────────────────────┤
 │ ios-core (compilé dans l'arbre amont)                                │
 │   src/CLI/*  → Slic3r::CLI::run()      (le point d'entrée du desktop) │
@@ -88,3 +89,38 @@ Les quatre patches :
 | CURL, OpenSSL | utilisés seulement par `src/slic3r` (réseau/GUI) ; reviendront avec la connexion QIDI en v2, et OpenSSL 1.1.0l demande alors son propre patch |
 | OCCT (import STEP) | `SLIC3R_ENABLE_FORMAT_STEP=OFF` en v1 : gros morceau, aucun besoin pour slicer du STL/3MF |
 | PCH | première compilation iOS : moins de variables d'un coup |
+
+### 8. ABI v2 : progression, annulation, export STL
+
+La v1 appelait `Slic3r::CLI::run()` : simple, mais sans progression ni annulation (la CLI écrit sur
+stdout et ne s'interrompt pas). La v2 utilise l'API objet que le binaire desktop emploie déjà :
+
+| Appel ABI | Implémentation libslic3r |
+|---|---|
+| `qsid_slice_async` | `FileReader::load_model` → `DynamicPrintConfig::load_from_ini` → `Print::apply` → `Print::process` → `Print::export_gcode` |
+| progression | `PrintBase::set_status_callback` (`SlicingStatus.percent/text`) |
+| `qsid_cancel` | drapeau atomique + `PrintBase::cancel()` (appelable depuis un autre thread, comme le GUI) |
+| `qsid_export_stl` | CLI `--export-stl` (le moteur convertit 3MF/OBJ/AMF en STL pour le visualiseur) |
+
+Un seul slicing à la fois (`QSID_ERR_BUSY`) : libslic3r n'est pas réentrant ; les erreurs
+d'annulation remontent en `QSID_ERR_CANCELED` (`Slic3r::CanceledException`).
+
+### 9. Profils : résolution d'héritage côté Swift
+
+Le bundle QIDI est un ensemble de sections héritées (`inherits = *Q2*; *0.12mm Extra High*`).
+Deux options : installer le bundle via `PresetBundle` (mécanique AppConfig + dossier vendor, non
+testable ici), ou **résoudre les chaînes nous-mêmes**. La seconde a été retenue : elle est explicite,
+vérifiable hors app, et produit un `.ini` complet que `qsid_slice_async` consomme sans état caché.
+
+Vérifié sur le vrai bundle : 24 imprimantes, 78 réglages, 858 filaments, séparateurs `,` **et** `;`,
+suffixes `@<imprimante>` ; `Q2 0.4 nozzle` → 94 clés, `0.12mm Extra High @Q2 0.4 nozzle` → 188,
+`QIDI ABS Odorless @Q2 0.4 nozzle` → 89, fusion → 369 clés.
+
+### 10. Rendu et réseau : ce qu'on ne porte pas
+
+- **Visualiseur** : SceneKit (donc Metal). On évite pour l'instant le portage du viewport C++
+  OpenGL ES (`SLIC3R_OPENGL_ES` + `libvgcode`) : SceneKit donne un rendu correct avec très peu de
+  code, et le G-code est affiché par couche (analyse en *streaming*, jamais le fichier entier).
+- **Réseau** : Swift `URLSession` (Moonraker). C'est l'option « réécrire les appels réseau en Swift »
+  de la roadmap : elle évite de porter OpenSSL 1.1.0l et libcurl, et laisse la place à `WKWebView`
+  si la connexion cloud QIDI est reprise un jour.
