@@ -42,6 +42,7 @@ private final class ProgressBox {
 
 final class SlicerCore {
     private var context: OpaquePointer?
+    private var thumbnailProvider: ThumbnailProvider?
 
     init(resourcesDirectory: URL, dataDirectory: URL) throws {
         let created = resourcesDirectory.path.withCString { res in
@@ -310,6 +311,22 @@ final class SlicerCore {
         guard let summary else { throw SlicerCoreError.engine("résumé de slicing absent") }
         defer { qsid_free(summary) }
         return try SceneJSON.decode(SliceSummary.self, from: String(cString: summary))
+    }
+
+    /// Installe (ou retire) le fournisseur de vignettes ; le moteur le garde jusqu'au remplacement.
+    func setThumbnailProvider(_ provider: ThumbnailProvider?) {
+        guard let context else { return }
+        thumbnailProvider = provider   // retenu côté Swift : le pointeur `user` n'est pas compté
+        guard let provider else { qsid_set_thumbnail_provider(context, nil, nil); return }
+        let user = Unmanaged.passUnretained(provider).toOpaque()
+        qsid_set_thumbnail_provider(context, { width, height, rgba, user in
+            guard let user, let rgba else { return 0 }
+            let provider = Unmanaged<ThumbnailProvider>.fromOpaque(user).takeUnretainedValue()
+            guard let bytes = provider.render(width: Int(width), height: Int(height)),
+                  bytes.count == Int(width) * Int(height) * 4 else { return 0 }
+            bytes.withUnsafeBufferPointer { rgba.update(from: $0.baseAddress!, count: bytes.count) }
+            return 1
+        }, user)
     }
 
     /// Mouvements du dernier slicing.

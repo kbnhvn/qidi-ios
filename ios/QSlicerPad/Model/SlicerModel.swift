@@ -71,6 +71,62 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var canUndo = false
     @Published private(set) var canRedo = false
 
+    // MARK: Calibration
+
+    @Published private(set) var calibration: CalibrationKind?
+    private var overridesBeforeCalibration: SliceOverrides?
+
+    /// Prépare une impression de calibration : vide le plateau, charge le modèle fourni,
+    /// applique les réglages temporaires. `endCalibration()` restaure tout.
+    func startCalibration(_ kind: CalibrationKind) {
+        errorMessage = nil
+        let height = Double(baseConfig["max_print_height"] ?? "") ?? 250
+        let plan: CalibrationPlan
+        do {
+            let effective = Dictionary(uniqueKeysWithValues: ["start_gcode", "before_layer_gcode"].map { ($0, value(of: $0) ?? "") })
+            plan = try Calibration.plan(for: kind, base: effective, maxPrintHeight: height)
+        } catch {
+            errorMessage = "Calibration impossible : \(error)"
+            return
+        }
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("qidi/calib/\(plan.resource)"),
+              FileManager.default.fileExists(atPath: url.path) else {
+            errorMessage = "Modèle de calibration absent du bundle."
+            return
+        }
+        Task {
+            do {
+                try await onEngine { try $0.clearScene() }
+                meshes.removeAll()
+                if overridesBeforeCalibration == nil { overridesBeforeCalibration = overrides }
+                for (key, value) in plan.overrides { overrides.set(key, value, base: baseConfig) }
+                let added = try await onEngine { try $0.addToScene(url) }
+                await refreshScene()
+                if let target = plan.targetHeight,
+                   let id = added.added.first,
+                   let object = scene?.objects.first(where: { $0.id == id }),
+                   object.localSize[2] > 1e-6 {
+                    transform(objectID: id, scale: [1, 1, target / object.localSize[2]], dropToBed: true, recordUndo: false)
+                }
+                calibration = kind
+                selectedObjectID = nil
+                output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []
+                workspace = .prepare
+                requestCamera(.frame)
+            } catch {
+                errorMessage = "Calibration impossible : \(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// Quitte la calibration : réglages d'origine restaurés, plateau vidé.
+    func endCalibration() {
+        if let saved = overridesBeforeCalibration { overrides = saved }
+        overridesBeforeCalibration = nil
+        calibration = nil
+        clearScene()
+    }
+
     // MARK: Caméra du plateau
 
     struct CameraRequest: Equatable {
@@ -121,6 +177,8 @@ final class SlicerModel: ObservableObject {
     }
     @Published private(set) var isUploading = false
     @Published private(set) var uploadStatus: String?
+    @Published private(set) var uploadProgress: Double?
+    @Published private(set) var printerStatus: PrinterStatus?
 
     // MARK: Réglages complets (chargés à la demande)
 
@@ -217,6 +275,10 @@ final class SlicerModel: ObservableObject {
         await applySelection(printer: printer,
                              print: d.string(forKey: DefaultsKey.print),
                              filament: d.string(forKey: DefaultsKey.filament))
+        if d.string(forKey: DefaultsKey.filament) == nil,
+           let preferred = FilamentIndex.preferredDefault(filamentPresets), preferred != selection.filament {
+            await applySelection(printer: nil, print: nil, filament: preferred)
+        }
         isRestoring = false
         presetsReady = true
         await refreshScene()
@@ -272,7 +334,7 @@ final class SlicerModel: ObservableObject {
             }
             printers = result.0
             printPresets = result.1
-            filamentPresets = result.2
+            filamentPresets = FilamentIndex.forPrinter(result.2, printer: selection.printer)
             baseConfig = result.3
         } catch {
             errorMessage = error.localizedDescription
@@ -600,6 +662,9 @@ final class SlicerModel: ObservableObject {
             if !text.isEmpty { self.progressText = text }
         }
 
+        // Vignettes de l'aperçu de l'imprimante : rendues depuis la scène telle qu'elle est.
+        let thumbnails = makeThumbnailProvider()
+
         Task {
             defer { relay.stop() }
             // Un slicing dure de quelques secondes à quelques minutes : écran éveillé et
@@ -608,6 +673,7 @@ final class SlicerModel: ObservableObject {
             defer { keepAwake.end() }
             do {
                 let result = try await onEngine { core -> (SliceSummary, [GCodeMove]) in
+                    core.setThumbnailProvider(thumbnails)
                     let summary = try core.sliceScene(output: outputURL) { percent, text in
                         relay.push(percent: Int(percent), text: text)
                     }
@@ -642,6 +708,21 @@ final class SlicerModel: ObservableObject {
     }
 
     func cancel() { core?.cancel() }
+
+    private func makeThumbnailProvider() -> ThumbnailProvider? {
+        guard let objects = scene?.objects, !objects.isEmpty else { return nil }
+        var lo = Vec3(repeating: .greatestFiniteMagnitude), hi = Vec3(repeating: -.greatestFiniteMagnitude)
+        var items: [ThumbnailProvider.Item] = []
+        for object in objects {
+            guard let triangles = meshes[object.id], !triangles.isEmpty else { continue }
+            items.append(.init(triangles: triangles, matrices: object.instances.map { BedSceneCoordinator.simdMatrix($0.matrix) }))
+            for i in object.instances {
+                lo = Vec3(Swift.min(lo.x, i.min[0]), Swift.min(lo.y, i.min[1]), Swift.min(lo.z, i.min[2]))
+                hi = Vec3(Swift.max(hi.x, i.max[0]), Swift.max(hi.y, i.max[1]), Swift.max(hi.z, i.max[2]))
+            }
+        }
+        return items.isEmpty ? nil : ThumbnailProvider(items: items, boundsMin: lo, boundsMax: hi)
+    }
 
     // MARK: Aperçu
 
@@ -682,20 +763,25 @@ final class SlicerModel: ObservableObject {
         }
         isUploading = true
         uploadStatus = "Envoi…"
+        uploadProgress = 0
         errorMessage = nil
 
         let client = MoonrakerClient(config: moonraker)
         let file = output.url
         Task {
             do {
-                try await client.upload(file: file, filename: file.lastPathComponent)
+                try await client.upload(file: file, filename: file.lastPathComponent) { [weak self] fraction in
+                    Task { @MainActor in self?.uploadProgress = fraction }
+                }
                 self.uploadStatus = "Envoi terminé, démarrage…"
                 try await client.startPrint(filename: file.lastPathComponent)
                 self.uploadStatus = "Impression lancée."
+                self.refreshPrinterStatus()
             } catch {
                 self.uploadStatus = nil
                 self.errorMessage = error.localizedDescription
             }
+            self.uploadProgress = nil
             self.isUploading = false
         }
     }
@@ -705,10 +791,11 @@ final class SlicerModel: ObservableObject {
         let client = MoonrakerClient(config: moonraker)
         Task {
             do {
-                let status = try await client.status()
-                self.uploadStatus = "\(status.state) — \(Int(status.progress * 100)) %"
+                printerStatus = try await client.status()
+                if !isUploading { uploadStatus = nil }
             } catch {
-                self.uploadStatus = error.localizedDescription
+                printerStatus = nil
+                uploadStatus = error.localizedDescription
             }
         }
     }

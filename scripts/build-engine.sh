@@ -50,7 +50,7 @@ cmake -S "$QSID_SRC" -B "$QSID_ENGINE_BUILD" -G Ninja \
 
 targets=(libslic3r qidislice)
 if [ "${1:-}" = "gate" ] && [ "$QSID_TARGET" = "host" ]; then
-    targets+=(qidislice_gate)
+    targets+=(qidislice_gate qidislice_scene_gate)
 fi
 
 info "cœur : build (${QSID_JOBS} jobs) — cibles : ${targets[*]}"

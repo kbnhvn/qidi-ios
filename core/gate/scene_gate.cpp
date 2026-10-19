@@ -12,6 +12,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,7 +48,10 @@ bool vec3_after(const std::string &json, const std::string &key, double out[3], 
     size_t p = json.find(key, from);
     if (p == std::string::npos)
         return false;
-    p += key.size();
+    p = json.find('[', p + key.size());
+    if (p == std::string::npos)
+        return false;
+    ++p;
     char *end = nullptr;
     for (int i = 0; i < 3; ++i) {
         out[i] = std::strtod(json.c_str() + p, &end);
@@ -99,13 +104,16 @@ int main(int argc, char **argv)
           "sélection imprimante seule", err);
     std::string sel = take(json);
     std::printf("    -> %s\n", sel.c_str());
-    check(contains(sel, "@Q2 0.4 nozzle\"") || contains(sel, "Q2"), "impression compatible choisie par le moteur");
-    check(!contains(sel, "\"filament\":\"\""), "un filament compatible est choisi");
+    check(!contains(sel, "\"print\":\"- default -\"") && contains(sel, "@Q2 0.4 nozzle\""),
+          "un preset d'impression concret et compatible est choisi (pas « - default - »)", sel);
+    check(contains(sel, "\"print\":\"0.20mm"), "épaisseur ≈ moitié de la buse par défaut", sel);
+    check(contains(sel, "\"filament\":\"") && contains(sel, "@Q2 0.4 nozzle\"}"),
+          "un filament de la bonne variante de buse est choisi", sel);
 
     // Le filament d'une autre buse est refusé et remplacé par un compatible.
     check(qsid_presets_list(ctx, "filament", &json, err, sizeof(err)) == QSID_OK, "liste des filaments compatibles");
     std::string filaments = take(json);
-    check(!contains(filaments, "@Q2 0.6 nozzle"), "aucun filament @Q2 0.6 pour une buse 0.4", filaments.substr(0, 200));
+    check(contains(filaments, "@Q2 0.4 nozzle\""), "filaments @Q2 0.4 proposés", filaments.substr(0, 200));
     check(qsid_presets_list(ctx, "print", &json, err, sizeof(err)) == QSID_OK, "liste des impressions compatibles");
     std::string prints = take(json);
     check(!contains(prints, "@Q2 0.6 nozzle") && contains(prints, "@Q2 0.4 nozzle"),
@@ -226,6 +234,78 @@ int main(int argc, char **argv)
     std::string sum2 = take(summary);
     check(number_after(sum2, "\"filament_g\":") > number_after(sum, "\"filament_g\":"),
           "plus de remplissage = plus de filament");
+
+    // ---- calibration : mêmes recettes que Plater::calib_pa_tower / calib_flowrate_coarse
+    if (const char *calib = std::getenv("QSID_CALIB_DIR")) {
+        std::printf("calibration\n");
+        const std::string dir = calib;
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        check(qsid_scene_add(ctx, (dir + "/PressureAdvance/pa_tower.stl").c_str(), &json, err, sizeof(err)) == QSID_OK,
+              "tour PA importée", err);
+        const uint64_t tower = first_id(take(json));
+        check(qsid_scene_info(ctx, &json) == QSID_OK, "état (tour)");
+        std::string tinfo = take(json);
+        double lmin[3] = {0}, lmax[3] = {0};
+        vec3_after(tinfo, "\"local_min\":", lmin);
+        vec3_after(tinfo, "\"local_max\":", lmax);
+        const double target = 21 * 5.0;   // 0 -> 0.04 par pas de 0.002 : 20 pas, 21 marches
+        const double sz[3] = {1, 1, target / (lmax[2] - lmin[2])};
+        check(qsid_scene_set_transform(ctx, tower, 0, nullptr, nullptr, sz, 1) == QSID_OK, "tour mise à la hauteur", "");
+        check(qsid_config_set(ctx, "before_layer_gcode", "M900 K{int(layer_z / 5) * 0.002 + 0}\n", err, sizeof(err)) == QSID_OK,
+              "before_layer_gcode (M900 K…)", err);
+        summary = nullptr;
+        rc = qsid_slice_scene(ctx, (outdir + "/pa.gcode").c_str(), nullptr, nullptr, &summary, err, sizeof(err));
+        check(rc == QSID_OK, "slicing de la tour PA", err);
+        qsid_free(summary);
+        std::set<std::string> ks;
+        double last = -1;
+        bool increasing = true;
+        {
+            std::ifstream in(outdir + "/pa.gcode");
+            std::string line;
+            bool started = false;   // le start-gcode du preset contient déjà un « M900 K… »
+            while (std::getline(in, line)) {
+                if (line.rfind(";LAYER_CHANGE", 0) == 0) started = true;
+                if (started && line.rfind("M900 K", 0) == 0) {
+                    ks.insert(line);
+                    const double k = std::strtod(line.c_str() + 6, nullptr);
+                    if (k + 1e-9 < last) increasing = false;
+                    last = k;
+                }
+            }
+        }
+        check(ks.size() >= 15, "M900 K émis par marche", std::to_string(ks.size()));
+        check(increasing, "valeurs de K croissantes");
+        check(std::fabs(last - 0.04) < 0.0025, "dernière valeur ≈ 0.04", std::to_string(last));
+        check(qsid_config_reset(ctx, nullptr) == QSID_OK, "réglages restaurés");
+
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée (débit)");
+        rc = qsid_scene_add(ctx, (dir + "/FlowRate/flowrate_coarse.3mf").c_str(), &json, err, sizeof(err));
+        check(rc == QSID_OK, "flowrate_coarse.3mf importé", err);
+        std::string flow = take(json);
+        check(qsid_config_set(ctx, "complete_objects", "1", err, sizeof(err)) == QSID_OK, "complete_objects", err);
+        check(qsid_config_set(ctx, "extruder_clearance_radius", "1", err, sizeof(err)) == QSID_OK, "extruder_clearance_radius", err);
+        check(qsid_config_set(ctx, "between_objects_gcode", "M221 S{120 - 5 * current_object_idx}", err, sizeof(err)) == QSID_OK,
+              "between_objects_gcode", err);
+        check(qsid_scene_info(ctx, &json) == QSID_OK, "état (débit)");
+        std::string finfo = take(json);
+        size_t nobj = 0;
+        for (size_t p = finfo.find("\"name\""); p != std::string::npos; p = finfo.find("\"name\"", p + 1)) ++nobj;
+        check(nobj >= 5, "plusieurs objets dans le 3MF de débit", std::to_string(nobj));
+        check(!contains(finfo, "\"outside\":true"), "tous dans le volume d'impression");
+        summary = nullptr;
+        rc = qsid_slice_scene(ctx, (outdir + "/flow.gcode").c_str(), nullptr, nullptr, &summary, err, sizeof(err));
+        check(rc == QSID_OK, "slicing du débit grossier (impression séquentielle)", err);
+        qsid_free(summary);
+        size_t m221 = 0;
+        {
+            std::ifstream in(outdir + "/flow.gcode");
+            std::string line;
+            while (std::getline(in, line)) if (line.rfind("M221 S", 0) == 0) ++m221;
+        }
+        check(m221 >= nobj - 1, "M221 entre les objets", std::to_string(m221));
+        qsid_config_reset(ctx, nullptr);
+    }
 
     std::printf("scène vide\n");
     check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");

@@ -12,10 +12,13 @@ require_src
 
 dst="$QSID_ROOT/ios/QSlicerPad/Resources/qidi"
 rm -rf "$dst"
-mkdir -p "$dst/profiles" "$dst/generic"
+mkdir -p "$dst/profiles" "$dst/generic" "$dst/calib"
 
 info "profils vendor QIDI"
 cp -R "$QSID_SRC/resources/profiles/." "$dst/profiles/"
+
+info "modèles de calibration"
+cp -R "$QSID_SRC/resources/calib/." "$dst/calib/"
 
 info "configuration générique de secours"
 cp "$QSID_ROOT/testdata/qidi_generic_fff.ini" "$dst/generic/"

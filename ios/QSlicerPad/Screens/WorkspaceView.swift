@@ -21,6 +21,7 @@ struct WorkspaceView: View {
     @State private var isImportingProfile = false
     @State private var showSettings = false
     @State private var showInspector = false
+    @State private var calibrationSheet: CalibrationSheet.Kind?
 
     private var isRegular: Bool { sizeClass == .regular }
 
@@ -45,6 +46,7 @@ struct WorkspaceView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
+            .sheet(item: $calibrationSheet) { kind in CalibrationSheet(kind: kind).environmentObject(model) }
             .sheet(isPresented: $showInspector) {
                 NavigationStack {
                     InspectorView(isImportingModel: $isImportingModel, isImportingProfile: $isImportingProfile)
@@ -104,6 +106,12 @@ struct WorkspaceView: View {
             Button { isImportingModel = true } label: { Image(systemName: "plus") }
                 .keyboardShortcut("o", modifiers: [.command])
                 .accessibilityLabel(L10n.t("Importer un modèle…"))
+            Menu {
+                Button(L10n.t("Pressure Advance (tour)…")) { calibrationSheet = .pressureAdvance }
+                Button(L10n.t("Débit — calibration grossière")) { model.startCalibration(.flowCoarse) }
+                Button(L10n.t("Débit — calibration fine…")) { calibrationSheet = .flowFine }
+            } label: { Image(systemName: "gauge.with.dots.needle.33percent") }
+                .accessibilityLabel(L10n.t("Calibration"))
             Button { showSettings = true } label: { Image(systemName: "gearshape") }
                 .keyboardShortcut(",", modifiers: [.command])
                 .accessibilityLabel(L10n.t("Réglages"))

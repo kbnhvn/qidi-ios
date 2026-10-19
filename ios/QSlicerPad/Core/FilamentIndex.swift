@@ -47,6 +47,23 @@ enum FilamentIndex {
         return "Autre"
     }
 
+    /// Le moteur liste les filaments compatibles avec le *modèle* d'imprimante, toutes
+    /// variantes de buse confondues (« … @Q2 0.2 nozzle », « … @Q2 0.4 nozzle »…) : on ne
+    /// garde que ceux de l'imprimante choisie (repli : tous, si aucun ne porte ce suffixe).
+    static func forPrinter(_ presets: [String], printer: String) -> [String] {
+        guard !printer.isEmpty else { return presets }
+        let same = presets.filter { $0.hasSuffix("@" + printer) }
+        return same.isEmpty ? presets : same
+    }
+
+    /// Filament proposé à la première utilisation : un PLA QIDI, à défaut un PLA générique.
+    static func preferredDefault(_ presets: [String]) -> String? {
+        for prefix in ["QIDI PLA", "Generic PLA"] {
+            if let match = presets.first(where: { $0.hasPrefix(prefix) }) { return match }
+        }
+        return presets.first
+    }
+
     static func search(_ entries: [FilamentEntry], query: String) -> [FilamentEntry] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return entries }

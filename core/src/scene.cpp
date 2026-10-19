@@ -334,17 +334,55 @@ int qsid_presets_select(qsid_ctx *ctx, const char *printer, const char *print, c
         }
         b.update_compatible(Compat::Always);
 
+        // Impression : celle demandée ; sinon, si le preset courant est le preset « défaut »
+        // du moteur, le preset concret compatible dont l'épaisseur de couche est la plus
+        // proche de la moitié du diamètre de buse (0,4 mm -> 0,20 mm).
         if (print && *print) {
             const Slic3r::Preset *p = b.prints.find_preset(print, false, false);
             if (p && p->is_compatible)
                 b.prints.select_preset_by_name(print, true);
+        } else if (b.prints.get_selected_preset().is_default) {
+            const double nozzle = b.printers.get_edited_preset().config.has("nozzle_diameter")
+                ? b.printers.get_edited_preset().config.option<Slic3r::ConfigOptionFloats>("nozzle_diameter")->get_at(0) : 0.4;
+            const Slic3r::Preset *best = nullptr;
+            double best_gap = 1e9;
+            for (const Slic3r::Preset &p : b.prints) {
+                if (p.is_default || !p.is_visible || !p.is_compatible)
+                    continue;
+                const double lh = p.config.opt_float("layer_height");
+                const double gap = std::fabs(lh - nozzle / 2);
+                if (gap < best_gap - 1e-9) { best = &p; best_gap = gap; }
+            }
+            if (best)
+                b.prints.select_preset_by_name(best->name, true);
         }
         b.update_compatible(Compat::Never, Compat::Always);
 
+        // Filament : celui demandé ; sinon, si aucun filament concret n'est choisi, un PLA
+        // QIDI, à défaut un PLA générique, à défaut le premier compatible.
         if (filament && *filament) {
             const Slic3r::Preset *f = b.filaments.find_preset(filament, false, false);
             if (f && f->is_compatible)
                 b.set_filament_preset(0, filament);
+        } else if (b.filaments.get_selected_preset().is_default || !b.filaments.get_selected_preset().is_compatible) {
+            const Slic3r::Preset *pick = nullptr;
+            for (const char *wanted : {"QIDI PLA", "Generic PLA", ""}) {
+                for (const Slic3r::Preset &f : b.filaments) {
+                    if (f.is_default || !f.is_visible || !f.is_compatible)
+                        continue;
+                    // même variante de buse que l'imprimante (suffixe « @<imprimante> »)
+                    const std::string suffix = "@" + b.printers.get_selected_preset_name();
+                    const bool same_printer = f.name.size() >= suffix.size() &&
+                        f.name.compare(f.name.size() - suffix.size(), suffix.size(), suffix) == 0;
+                    if (same_printer && f.name.rfind(wanted, 0) == 0) { pick = &f; break; }
+                }
+                if (pick) break;
+            }
+            if (!pick)
+                for (const Slic3r::Preset &f : b.filaments)
+                    if (!f.is_default && f.is_visible && f.is_compatible) { pick = &f; break; }
+            if (pick)
+                b.set_filament_preset(0, pick->name);
         }
 
         ctx->base_config = b.full_config();

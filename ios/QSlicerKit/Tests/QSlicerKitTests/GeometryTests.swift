@@ -123,6 +123,17 @@ final class FilamentIndexTests: XCTestCase {
         XCTAssertEqual(byName["QIDI ASA-Aero"], "ASA")
     }
 
+    func testPrinterVariantFilteringAndDefault() {
+        let all = ["Bambu PLA @Q2 0.2 nozzle", "QIDI PLA Rapido @Q2 0.2 nozzle", "Bambu PLA @Q2 0.4 nozzle",
+                   "QIDI PLA Rapido @Q2 0.4 nozzle", "Generic PETG @Q2 0.4 nozzle"]
+        let mine = FilamentIndex.forPrinter(all, printer: "Q2 0.4 nozzle")
+        XCTAssertEqual(mine.count, 3)
+        XCTAssertTrue(mine.allSatisfy { $0.hasSuffix("@Q2 0.4 nozzle") })
+        XCTAssertEqual(FilamentIndex.preferredDefault(mine), "QIDI PLA Rapido @Q2 0.4 nozzle")
+        XCTAssertEqual(FilamentIndex.preferredDefault(["Generic PETG @x", "Generic PLA @x"]), "Generic PLA @x")
+        XCTAssertEqual(FilamentIndex.forPrinter(all, printer: "Inconnue"), all, "repli : tous")
+    }
+
     func testSearchAndGrouping() {
         let entries = FilamentIndex.entries(names)
         XCTAssertEqual(FilamentIndex.search(entries, query: "petg").count, 2)

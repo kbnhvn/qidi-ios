@@ -46,7 +46,10 @@ struct SettingsView: View {
                 model.refreshPrinterStatus()
             }
             .disabled(!model.moonraker.isConfigured)
-            if let status = model.uploadStatus {
+            if let status = model.printerStatus {
+                Text("\(L10n.t(status.stateLabel))" + (status.nozzle.map { String(format: " · %.0f °C", $0) } ?? ""))
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else if let status = model.uploadStatus {
                 Text(status).font(.footnote).foregroundStyle(.secondary)
             }
         } header: {

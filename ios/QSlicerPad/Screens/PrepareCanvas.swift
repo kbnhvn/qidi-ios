@@ -65,6 +65,11 @@ struct PrepareCanvas: View {
             Banner(icon: "exclamationmark.octagon.fill", text: error, action: nil, perform: {},
                    dismiss: { model.errorMessage = nil })
         }
+        if let calibration = model.calibration {
+            Banner(icon: "gauge.with.dots.needle.33percent",
+                   text: "\(L10n.t("Calibration")) : \(L10n.t(calibration.title)) — \(L10n.t("réglages temporaires"))",
+                   action: L10n.t("Quitter"), perform: { model.endCalibration() }, dismiss: nil)
+        }
         if model.layOnFaceMode {
             Banner(icon: "square.3.layers.3d.down.forward",
                    text: L10n.t("Touchez la face qui doit reposer sur le plateau."),

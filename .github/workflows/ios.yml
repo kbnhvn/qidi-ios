@@ -125,6 +125,19 @@ jobs:
   # 1. Gate hôte : compile le moteur pour macOS et slice un cube de test.
   #    Rapide à lire, et c'est le seul endroit où un binaire s'exécute.
   # ---------------------------------------------------------------------------
+  # Tests Swift de la logique pure (profils, options, géométrie du plateau, caméra,
+  # maillage G-code, catalogue des réglages, Moonraker, calibration) : Linux, donc sans
+  # minutes macOS. À chaque push.
+  swift-tests:
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: ios/QSlicerKit
+        run: swift test
+
   host-gate:
     needs: configure-check
     # `env` n'est pas disponible dans un `if` de job : l'expression est répétée

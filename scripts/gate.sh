@@ -55,6 +55,18 @@ for variant in z30 zm5; do
     echo "    $variant : G-code identique au cube posé"
 done
 
+info "gate : ABI v3 (presets du bundle QIDI, scène, manipulation, slicing incrémental, calibration)"
+scene_gate="$(find "$QSID_ENGINE_BUILD" -name qidislice_scene_gate -type f -perm -u+x | head -1 || true)"
+[ -x "$scene_gate" ] || die "qidislice_scene_gate introuvable — lancez scripts/build-engine.sh gate"
+QSID_RESOURCES_DIR="$QSID_SRC/resources" \
+QSID_DATA_DIR="$out/data" \
+QSID_CALIB_DIR="$QSID_SRC/resources/calib" \
+    "$scene_gate" "$QSID_SRC/resources/profiles/QIDITechnology.ini" \
+                  "$QSID_ROOT/testdata/cube_20mm.stl" \
+                  "$QSID_ROOT/testdata/cube_20mm_z30.stl" \
+                  "$out" 2>&1 | grep -v "Vendor Config Bundle\|invalid toolchange"
+[ "${PIPESTATUS[0]}" = "0" ] || die "la gate de scène (ABI v3) a échoué"
+
 info "gate : révision du G-code"
 grep -c "^G1" "$out/cube_20mm.gcode" >/dev/null || die "aucun mouvement G1 dans le G-code"
 grep -q "G28" "$QSID_BUILD/gate-out/cube_20mm.gcode" || echo "    (note : pas de G28 — le start-gcode générique est minimal)"

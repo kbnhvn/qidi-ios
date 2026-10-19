@@ -240,6 +240,21 @@ struct PrinterSection: View {
             LabeledContent(L10n.t("Adresse"), value: model.moonraker.isConfigured
                            ? "\(model.moonraker.host):\(model.moonraker.port)"
                            : L10n.t("non configurée"))
+
+            if let status = model.printerStatus {
+                LabeledContent(L10n.t("État"), value: L10n.t(status.stateLabel))
+                if !status.filename.isEmpty { LabeledContent(L10n.t("Fichier"), value: status.filename) }
+                if status.state == "printing" || status.state == "paused" {
+                    ProgressView(value: status.progress) { Text("\(Int(status.progress * 100)) %").font(.footnote.monospacedDigit()) }
+                }
+                if let nozzle = status.nozzle {
+                    LabeledContent(L10n.t("Buse"), value: String(format: "%.0f / %.0f °C", nozzle, status.nozzleTarget ?? 0))
+                }
+                if let bed = status.bed {
+                    LabeledContent(L10n.t("Plateau chauffant"), value: String(format: "%.0f / %.0f °C", bed, status.bedTarget ?? 0))
+                }
+            }
+
             Button { model.uploadAndPrint() } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "paperplane")
@@ -250,13 +265,25 @@ struct PrinterSection: View {
                 .frame(maxWidth: .infinity, minHeight: 52)
             }
             .buttonStyle(.bordered)
-            .disabled(model.isUploading || !model.moonraker.isConfigured)
+            .disabled(model.isUploading || !model.moonraker.isConfigured || model.resultIsStale)
+
+            if let fraction = model.uploadProgress {
+                ProgressView(value: fraction) { Text("\(L10n.t("Envoi")) \(Int(fraction * 100)) %").font(.footnote) }
+            }
             if let status = model.uploadStatus {
                 Text(status).font(.footnote).foregroundStyle(.secondary)
             }
             Button(L10n.t("Actualiser l'état")) { model.refreshPrinterStatus() }
                 .frame(minHeight: 44)
                 .disabled(!model.moonraker.isConfigured)
+        }
+        // L'état est rafraîchi tant que la section est à l'écran.
+        .task(id: model.moonraker) {
+            guard model.moonraker.isConfigured else { return }
+            while !Task.isCancelled {
+                model.refreshPrinterStatus()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
         }
     }
 }
