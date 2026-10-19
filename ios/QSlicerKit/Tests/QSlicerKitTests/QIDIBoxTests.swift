@@ -67,3 +67,75 @@ final class QIDIBoxTests: XCTestCase {
         XCTAssertTrue(GCodeColorMode.tool.isCategorical && GCodeColorMode.featureType.isCategorical && !GCodeColorMode.speed.isCategorical)
     }
 }
+
+/// Fil d'exécution du moteur : ordre des travaux et grande pile.
+final class EngineThreadTests: XCTestCase {
+    func testJobsRunInOrderOnOneThread() {
+        let thread = EngineThread(name: "test.engine", stackSize: 16 * 1024 * 1024)
+        defer { thread.stop() }
+        let done = expectation(description: "travaux")
+        let lock = NSLock()
+        var order: [Int] = []
+        var threads = Set<ObjectIdentifier>()
+        for i in 0..<50 {
+            thread.async {
+                lock.lock()
+                order.append(i)
+                threads.insert(ObjectIdentifier(Thread.current))
+                lock.unlock()
+                if i == 49 { done.fulfill() }
+            }
+        }
+        wait(for: [done], timeout: 10)
+        XCTAssertEqual(order, Array(0..<50))
+        XCTAssertEqual(threads.count, 1, "un seul thread pour tous les travaux")
+    }
+
+    func testDeepRecursionSurvivesOnTheBigStack() {
+        // ≈ 4 Mo de pile : dépasse les 512 Ko d'un thread secondaire GCD sous iOS
+        func depth(_ n: Int) -> Int {
+            var pad = [UInt8](repeating: UInt8(truncatingIfNeeded: n), count: 256)
+            pad[0] = UInt8(truncatingIfNeeded: n)
+            return n == 0 ? Int(pad[0]) : depth(n - 1) &+ Int(pad[pad.count - 1] & 1)
+        }
+        let thread = EngineThread(name: "test.deep", stackSize: 64 * 1024 * 1024)
+        defer { thread.stop() }
+        let done = expectation(description: "récursion")
+        var result = -1
+        thread.async { result = depth(10_000); done.fulfill() }
+        wait(for: [done], timeout: 20)
+        XCTAssertGreaterThanOrEqual(result, 0)
+    }
+}
+
+final class SliceBreadcrumbTests: XCTestCase {
+    private func temp() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("crumb-\(UUID().uuidString).txt") }
+
+    func testInterruptedSliceReportsItsLastStage() {
+        let url = temp()
+        let crumb = SliceBreadcrumb(url: url)
+        crumb.begin(summary: "2 objets")
+        crumb.note(percent: 10, text: "Traitement des maillages")
+        crumb.note(percent: 10, text: "Traitement des maillages")   // répétition ignorée
+        crumb.note(percent: 45, text: "Génération des périmètres")
+        // l'app est tuée ici : un nouveau processus relit la trace
+        let relaunched = SliceBreadcrumb(url: url)
+        XCTAssertEqual(relaunched.interruptedStage(), "45 % — Génération des périmètres")
+        XCTAssertNil(relaunched.interruptedStage(), "lue une seule fois")
+    }
+
+    func testNormalEndLeavesNothing() {
+        let url = temp()
+        let crumb = SliceBreadcrumb(url: url)
+        crumb.begin(summary: "1 objet")
+        crumb.note(percent: 90, text: "Export du G-code")
+        crumb.end()
+        XCTAssertNil(SliceBreadcrumb(url: url).interruptedStage())
+    }
+
+    func testCrashBeforeAnyProgress() {
+        let url = temp()
+        SliceBreadcrumb(url: url).begin(summary: "1 objet")
+        XCTAssertEqual(SliceBreadcrumb(url: url).interruptedStage(), "début : 1 objet (avant toute progression)")
+    }
+}

@@ -100,6 +100,12 @@ static void write_sphere_stl(const std::string &path, double r, int seg, int rin
     out << "endsolid sphere\n";
 }
 
+static bool slice_after_restore_ok(qsid_ctx *ctx, const std::string &outdir)
+{
+    char err[256] = {0};
+    return qsid_slice_scene(ctx, (outdir + "/restore.gcode").c_str(), nullptr, nullptr, nullptr, err, sizeof(err)) == QSID_OK;
+}
+
 /* Fournisseur de vignettes factice : damier (remplit RGBA, lignes de haut en bas). */
 static int g_thumb_calls = 0;
 static int checker_provider(int w, int h, uint8_t *rgba, void *user)
@@ -649,6 +655,46 @@ int main(int argc, char **argv)
         take(json);
         qsid_config_base(ctx, &cfg);
         check(count_values(take(cfg), "nozzle_diameter") == 1, "nozzle_diameter à 1 valeur");
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+    }
+
+    // ---- instantanés : annuler / rétablir une coupe, une simplification, des réglages
+    {
+        std::printf("instantanés de la scène\n");
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err));
+        const uint64_t oid = first_id(take(json));
+        uint64_t before = 0, after = 0;
+        check(qsid_scene_snapshot(ctx, &before) == QSID_OK && before != 0, "instantané avant la coupe");
+        qsid_scene_info(ctx, &json);
+        const std::string info0 = take(json);
+        double mn[3], mx[3];
+        vec3_after(info0, "\"min\":", mn);
+        vec3_after(info0, "\"max\":", mx);
+        const double pt[3] = {(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, 10}, up[3] = {0, 0, 1};
+        check(qsid_scene_cut(ctx, oid, 0, pt, up, 3, 0, &json, err, sizeof(err)) == QSID_OK, "coupe", err);
+        take(json);
+        check(qsid_object_config_set(ctx, oid + 1000, 0, "fill_density", "100%", err, sizeof(err)) == QSID_ERR_ARG, "objet disparu : refusé");
+        check(qsid_scene_snapshot(ctx, &after) == QSID_OK && after > before, "instantané après la coupe");
+        check(qsid_scene_restore(ctx, before) == QSID_OK, "annuler la coupe");
+        qsid_scene_info(ctx, &json);
+        std::string back = take(json);
+        size_t n = 0;
+        for (size_t p = back.find("\"local_min\""); p != std::string::npos; p = back.find("\"local_min\"", p + 1)) ++n;
+        check(n == 1 && contains(back, "\"id\":" + std::to_string(oid) + ","), "un objet, avec son identifiant d'origine", back.substr(0, 120));
+        check(qsid_object_config_set(ctx, oid, 0, "fill_density", "100%", err, sizeof(err)) == QSID_OK, "l'objet restauré est éditable", err);
+        check(qsid_scene_restore(ctx, after) == QSID_OK, "rétablir la coupe");
+        qsid_scene_info(ctx, &json);
+        back = take(json);
+        n = 0;
+        for (size_t p = back.find("\"local_min\""); p != std::string::npos; p = back.find("\"local_min\"", p + 1)) ++n;
+        check(n == 2, "deux objets de nouveau", std::to_string(n));
+        check(qsid_scene_restore(ctx, before) == QSID_OK, "l'instantané reste utilisable");
+        check(slice_after_restore_ok(ctx, outdir), "on peut slicer après une restauration");
+        check(qsid_scene_discard_snapshot(ctx, before) == QSID_OK && qsid_scene_restore(ctx, before) == QSID_ERR_ARG, "instantané oublié");
+        uint64_t last = 0;
+        for (int i = 0; i < 70; ++i) qsid_scene_snapshot(ctx, &last);
+        check(qsid_scene_restore(ctx, after) == QSID_ERR_ARG && qsid_scene_restore(ctx, last) == QSID_OK, "les plus anciens sont oubliés (64 au plus)");
         check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
     }
 

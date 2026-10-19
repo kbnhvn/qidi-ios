@@ -1,0 +1,1 @@
+../../../QSlicerPad/Core/SoftwareThumbnail.swift

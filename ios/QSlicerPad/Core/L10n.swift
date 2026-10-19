@@ -31,6 +31,8 @@ enum L10n {
     }
 
     private static let english: [String: String] = [
+        "Le dernier slicing s'est interrompu brutalement. Dernière étape : ": "The last slice was interrupted abruptly. Last step: ",
+        "Impossible d'annuler : ": "Cannot undo: ",
         "Filaments": "Filaments",
         "Emplacement du Box": "Box slot",
         "Utiliser le QIDI Box": "Use the QIDI Box",

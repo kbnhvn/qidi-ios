@@ -31,6 +31,7 @@
 #include "libslic3r/BuildVolume.hpp"
 #include "libslic3r/MultipleBeds.hpp"
 #include "libslic3r/Model.hpp"
+#include <tbb/global_control.h>
 // Place les objets sur le plateau (wrapper fourni par la cible slic3r-arrange-wrapper,
 // que la CLI amont utilise aussi).
 #include <arrange-wrapper/ModelArrange.hpp>
@@ -66,6 +67,11 @@ extern "C" {
 
 qsid_ctx *qsid_create(const char *resources_dir, const char *data_dir)
 {
+    // Les threads de travail de TBB ont une pile réduite sous iOS (512 Ko pour un thread secondaire) :
+    // Arachne, Clipper et le découpage récursif la dépassent sur des modèles réels. 16 Mo, avant la
+    // première utilisation de TBB (qsid_create est le premier appel).
+    static tbb::global_control stack_size(tbb::global_control::thread_stack_size, std::size_t(16) * 1024 * 1024);
+
     auto *ctx = new (std::nothrow) qsid_ctx();
     if (!ctx)
         return nullptr;

@@ -155,7 +155,7 @@ capturées dans `ios/QSlicerKit/Tests/QSlicerKitTests/Fixtures/engine/` et déco
 
 | Couche | Contenu | Où c'est vérifié |
 |---|---|---|
-| `Core/*.swift` (Foundation seul) | géométrie du plateau et caméra, maillage du G-code, options, catalogue des réglages, filaments, calibrations (tour, ligne, motif, débit, débit volumétrique), plan de coupe, réglages par objet, sélection de groupe, QIDI Box, préréglages, découverte réseau, Moonraker, types JSON | `ios/QSlicerKit` : `swift test` sous Linux (82 tests) |
+| `Core/*.swift` (Foundation seul) | géométrie du plateau et caméra, maillage du G-code, options, catalogue des réglages, filaments, calibrations (tour, ligne, motif, débit, débit volumétrique), plan de coupe, réglages par objet, sélection de groupe, QIDI Box, préréglages, découverte réseau, Moonraker, types JSON | `ios/QSlicerKit` : `swift test` sous Linux (91 tests) |
 | `QSlicerCore` + `SlicerModel` | pont C, file série du moteur, état | `scripts/typecheck-swift.sh` : types avec le vrai en-tête C |
 | `Screens/*.swift`, `BedSceneView`, `GCodeSceneView`, `ThumbnailRenderer` | SwiftUI / SceneKit / UIKit | analyse syntaxique sous Linux ; compilation par la CI `ios-app` ; recette iPad |
 
@@ -201,3 +201,22 @@ sondant `GET /server/info` — seul un vrai Moonraker répond avec `moonraker_ve
 (`_moonraker._tcp`, `_http._tcp`) accélère la recherche. Info.plist déclare `NSBonjourServices` et la raison de
 l'accès au réseau local.
 
+### 14. Robustesse du slicing sur iPad
+
+Trois choses se jouent au moment de « Slicer », et aucune ne se voyait sous Linux :
+
+- **Pile.** Un thread secondaire de GCD n'a que 512 Ko de pile sous iOS (8 Mo ailleurs) ; le découpage récursif de
+  libslic3r la dépasse sur des modèles réels et l'app tombe sans message. Le moteur tourne donc sur un fil dédié de
+  **64 Mo** (`EngineThread`, Swift) et les threads de travail de TBB reçoivent **16 Mo** (`tbb::global_control` dans
+  `qsid_create`).
+- **Vignettes.** Le moteur appelle le fournisseur *pendant* le slicing, depuis son thread. Un rendu SceneKit/Metal hors
+  écran exigeait le thread principal et un appareil Metal : remplacé par un rasteriseur logiciel
+  (`SoftwareThumbnail` : tampon de profondeur, Lambert, suréchantillonnage 2×2), sans appel système, testé sous Linux.
+- **Trace de plantage.** `SliceBreadcrumb` écrit la progression sur disque au fil de l'eau ; au lancement suivant,
+  si le fichier existe encore, l'app affiche la dernière étape atteinte.
+
+### 15. Annuler / rétablir
+
+L'historique mêle deux sortes d'entrées : un groupe de transformations (déplacements, rotations, échelles) et un
+**instantané complet de la scène** (`qsid_scene_snapshot/restore/discard`). Les maillages sont partagés (`shared_ptr`) :
+un instantané coûte peu, 64 au plus côté moteur, 60 entrées côté app. Restaurer conserve les identifiants d'objets.

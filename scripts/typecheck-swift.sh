@@ -35,7 +35,7 @@ if ! "$SWIFTC" -typecheck -I "$W" -import-objc-header "$T/Bridge.h" -Xcc "-I$ROO
     "$A/Model/SlicerModel.swift" "$A/Core/QSlicerCore.swift" "$A/Core/SceneTypes.swift" \
     "$A/Core/SliceOverrides.swift" "$A/Core/FilamentIndex.swift" "$A/Core/GCodeMesh.swift" \
     "$A/Core/SettingsCatalog.swift" "$A/Core/Calibration.swift" "$A/Core/MoonrakerClient.swift" \
-    "$A/Core/BedGeometry.swift" "$A/Core/CalibrationGCode.swift" "$A/Core/PrinterDiscovery.swift" "$A/Core/UserPresets.swift" "$A/Core/QIDIBox.swift" "$A/Core/CutPlane.swift" "$A/Core/ObjectSettings.swift" "$A/Core/L10n.swift" 2>"$W/typecheck.log"; then
+    "$A/Core/BedGeometry.swift" "$A/Core/CalibrationGCode.swift" "$A/Core/PrinterDiscovery.swift" "$A/Core/UserPresets.swift" "$A/Core/QIDIBox.swift" "$A/Core/EngineThread.swift" "$A/Core/SoftwareThumbnail.swift" "$A/Core/ThumbnailRenderer.swift" "$A/Core/SliceBreadcrumb.swift" "$A/Core/CutPlane.swift" "$A/Core/ObjectSettings.swift" "$A/Core/L10n.swift" 2>"$W/typecheck.log"; then
     grep -E "error|warning" "$W/typecheck.log" | head -20
     status=1
 fi

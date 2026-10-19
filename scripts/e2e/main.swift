@@ -196,6 +196,12 @@ func run() async -> Int32 {
     _ = await waitUntil(30, "réglage d'objet") { object()?.config["fill_density"] != nil }
     check(object()?.config["fill_density"] == "100%" && model.isObjectOptionModified("fill_density", objectID: keep),
           "réglage d'objet enregistré par le moteur")
+    model.undo()
+    _ = await waitUntil(30, "annuler le réglage") { object()?.config["fill_density"] == nil }
+    check(object()?.config["fill_density"] == nil && model.canRedo, "annuler retire le réglage d'objet")
+    model.redo()
+    _ = await waitUntil(30, "rétablir le réglage") { object()?.config["fill_density"] == "100%" }
+    check(object()?.config["fill_density"] == "100%", "rétablir le remet")
     check(model.objectValue(of: "fill_density", objectID: keep) == "100%", "valeur effective de l'objet")
     check(model.objectValue(of: "perimeters", objectID: keep) == model.value(of: "perimeters"), "sinon la valeur globale")
     check(object()?.hasCustomSettings == true, "l'objet est signalé comme personnalisé")
@@ -239,6 +245,13 @@ func run() async -> Int32 {
     check(heights.allSatisfy { abs($0 - 10) < 0.05 }, "deux moitiés de 10 mm", "\(heights)")
     check(model.selectedObjectIDs.count == 2, "les moitiés sont sélectionnées")
     check(model.scene?.hasObjectOutsideBed == false, "les moitiés sont dans le volume d'impression")
+    model.undo()
+    _ = await waitUntil(30, "annuler la coupe") { model.scene?.objects.count == 1 }
+    check(model.scene?.objects.map(\.id) == [keep], "annuler la coupe rend l'objet d'origine (même identifiant)", "\(String(describing: model.scene?.objects.map(\.id)))")
+    model.redo()
+    _ = await waitUntil(30, "rétablir la coupe") { model.scene?.objects.count == 2 }
+    check(model.scene?.objects.count == 2, "rétablir la coupe")
+    model.selectedObjectID = model.scene?.objects.first?.id
     model.beginCut(axis: .x)
     model.applyCut(keep: .upper, placeOnCut: true)
     _ = await waitUntil(60, "seconde coupe") { model.scene?.objects.count == 2 && model.cutPlane == nil && model.selectedObjectIDs.count == 1 }
@@ -253,6 +266,10 @@ func run() async -> Int32 {
     check((model.scene?.objects.first?.triangles ?? Int.max) < sphere.triangles / 2, "maillage simplifié",
           "\(sphere.triangles) -> \(model.scene?.objects.first?.triangles ?? -1)")
     check(model.meshes[sphere.id]?.count == (model.scene?.objects.first?.triangles ?? -1) * 9, "le maillage affiché suit la simplification")
+    model.undo()
+    _ = await waitUntil(60, "annuler la simplification") { model.scene?.objects.first?.triangles == sphere.triangles }
+    check(model.scene?.objects.first?.triangles == sphere.triangles && model.meshes[sphere.id]?.count == sphere.triangles * 9,
+          "annuler la simplification rend le maillage d'origine")
     model.clearScene()
     _ = await waitUntil(30, "plateau vidé 2") { model.scene?.objects.isEmpty == true }
     model.importModel(from: testdata.appendingPathComponent("cube_20mm.stl"))

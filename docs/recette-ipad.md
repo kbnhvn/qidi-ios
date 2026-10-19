@@ -41,7 +41,9 @@ Version testée : `Réglages → À propos` (ligne « Moteur » de l'inspecteur)
 - [ ] Les quatre boutons de vue (Recadrer / Dessus / Face / Isométrique) changent réellement la vue.
 - [ ] Barre d'actions : Dupliquer, Poser sur une face (toucher une face incline l'objet pour qu'elle repose
       sur le plateau), Poser sur le plateau, Centrer, Orientation d'origine, Organiser, Supprimer.
-- [ ] Annuler / Rétablir (⌘Z / ⇧⌘Z) défont un déplacement et une rotation (un geste sur plusieurs objets = un seul pas).
+- [ ] Annuler / Rétablir (⌘Z / ⇧⌘Z) défont un déplacement, une rotation (un geste sur plusieurs objets = un seul pas)
+      **et aussi une coupe, une simplification, une suppression, un réglage d'objet, un modificateur, une plage de hauteurs**
+      (l'objet d'origine revient avec son maillage et ses réglages).
 - [ ] Clavier : ⌥+flèches = 1 mm, ⌥⇧+flèches = 10 mm, ⌘D copie, ⇧⌘A organise, **⌘A sélectionne tout**, Échap désélectionne.
 - [ ] ★ **Appui long** (ou clic droit avec une souris) sur un objet : menu contextuel — Dupliquer, Poser sur une
       face, Poser sur le plateau, Orientation d'origine, Couper…, Simplifier le maillage…, Réglages de l'objet…,
@@ -94,6 +96,12 @@ Version testée : `Réglages → À propos` (ligne « Moteur » de l'inspecteur)
 - [ ] Filament : « Filament » ouvre une liste groupée par matière (PLA, PETG, ABS…) avec recherche.
 
 ## 6. Slicing
+
+- [ ] ★ **Slicer ne ferme plus l'app** (cube, puis un modèle plus lourd). Si elle se ferme malgré tout : relancer l'app —
+      un bandeau indique « Le dernier slicing s'est interrompu brutalement. Dernière étape : … » (pourcentage et texte du
+      moteur). Noter cette étape et, si possible, joindre le rapport de plantage (Réglages iOS → Confidentialité et sécurité →
+      Analyse et améliorations → Données d'analyse → QSlicerPad-….ips).
+- [ ] La vignette affichée sur l'écran de l'imprimante montre bien les objets (rendue sans SceneKit).
 
 - [ ] « Slicer » (⌘↩) : la progression avance (pas figée à 0 %), l'écran ne s'éteint pas.
 - [ ] « Annuler » arrête vraiment ; l'app reste utilisable ; un nouveau slicing fonctionne ensuite.

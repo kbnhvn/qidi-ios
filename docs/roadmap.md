@@ -66,7 +66,7 @@ dépendance externe.
 ## v1.2 — plateau, aperçu, réglages (voir `audit-ui-slicing.md`)
 
 - [x] ✅ ABI v3 : session « scène », presets du moteur, réglages forcés validés, slicing incrémental,
-  mouvements du G-code, vignettes fournies par l'hôte — **gate de scène verte** (163 vérifications) sur le
+  mouvements du G-code, vignettes fournies par l'hôte — **gate de scène verte** (178 vérifications) sur le
   vrai moteur et le vrai bundle QIDI (banc Linux ; la CI macOS l'exécute dans `host-gate`)
 - [x] ✅ correctifs de l'audit : `ensure_on_bed` (cubes décalés en Z = G-code identique), annulation sûre,
   filament cohérent avec l'imprimante, options « valeurs forcées »

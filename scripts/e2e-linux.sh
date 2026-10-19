@@ -48,7 +48,7 @@ echo "==> compilation du test (SlicerModel + QSlicerCore + Core/*.swift)"
     "$A/Model/SlicerModel.swift" "$A/Core/QSlicerCore.swift" "$A/Core/SceneTypes.swift" \
     "$A/Core/SliceOverrides.swift" "$A/Core/FilamentIndex.swift" "$A/Core/GCodeMesh.swift" \
     "$A/Core/SettingsCatalog.swift" "$A/Core/Calibration.swift" "$A/Core/MoonrakerClient.swift" \
-    "$A/Core/BedGeometry.swift" "$A/Core/CalibrationGCode.swift" "$A/Core/PrinterDiscovery.swift" "$A/Core/UserPresets.swift" "$A/Core/QIDIBox.swift" "$A/Core/CutPlane.swift" "$A/Core/ObjectSettings.swift" "$A/Core/L10n.swift" \
+    "$A/Core/BedGeometry.swift" "$A/Core/CalibrationGCode.swift" "$A/Core/PrinterDiscovery.swift" "$A/Core/UserPresets.swift" "$A/Core/QIDIBox.swift" "$A/Core/EngineThread.swift" "$A/Core/SoftwareThumbnail.swift" "$A/Core/ThumbnailRenderer.swift" "$A/Core/SliceBreadcrumb.swift" "$A/Core/CutPlane.swift" "$A/Core/ObjectSettings.swift" "$A/Core/L10n.swift" \
     "${link_args[@]}" -o "$W/e2e"
 
 echo "==> Moonraker simulé"

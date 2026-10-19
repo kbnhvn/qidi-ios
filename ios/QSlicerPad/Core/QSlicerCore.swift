@@ -310,6 +310,25 @@ final class SlicerCore {
         try Self.check(status, error)
     }
 
+    // Instantanés de la scène (annuler / rétablir)
+
+    func snapshotScene() throws -> UInt64 {
+        guard let context else { throw SlicerCoreError.unavailable }
+        var id: UInt64 = 0
+        try Self.check(qsid_scene_snapshot(context, &id))
+        return id
+    }
+
+    func restoreScene(_ id: UInt64) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        try Self.check(qsid_scene_restore(context, id))
+    }
+
+    func discardSnapshot(_ id: UInt64) {
+        guard let context else { return }
+        _ = qsid_scene_discard_snapshot(context, id)
+    }
+
     // Coupe, simplification, réglages par objet
 
     /// Coupe l'objet par un plan (repère monde). `keep` : 1 = dessus, 2 = dessous, 3 = les deux.

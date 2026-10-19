@@ -215,6 +215,14 @@ QSID_EXPORT int qsid_scene_drop_to_bed(qsid_ctx *ctx, uint64_t object_id);
 QSID_EXPORT int qsid_scene_lay_on_face(qsid_ctx *ctx, uint64_t object_id, int instance,
                                        size_t triangle, char *err_msg, size_t err_len);
 
+/* ---- Instantanés de la scène (annuler / rétablir) ----
+ * Sauvegarde l'état complet de la scène (objets, volumes, réglages, plages) ; les identifiants
+ * d'objets sont conservés à la restauration. Au plus 64 instantanés : les plus anciens sont
+ * oubliés. */
+QSID_EXPORT int qsid_scene_snapshot(qsid_ctx *ctx, uint64_t *snapshot_id);
+QSID_EXPORT int qsid_scene_restore(qsid_ctx *ctx, uint64_t snapshot_id);
+QSID_EXPORT int qsid_scene_discard_snapshot(qsid_ctx *ctx, uint64_t snapshot_id);
+
 /* ---- Coupe et simplification ---- */
 
 /* Coupe un objet par un plan (CutUtils : mêmes algorithmes que l'outil de coupe du

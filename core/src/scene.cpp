@@ -1183,6 +1183,50 @@ int qsid_scene_lay_on_face(qsid_ctx *ctx, uint64_t object_id, int instance, size
 }
 
 
+// ============================================================ Instantanés
+
+int qsid_scene_snapshot(qsid_ctx *ctx, uint64_t *snapshot_id)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    if (!snapshot_id)
+        return QSID_ERR_ARG;
+    try {
+        constexpr size_t kMax = 64;
+        while (ctx->snapshots.size() >= kMax)
+            ctx->snapshots.erase(ctx->snapshots.begin());   // clés croissantes : le plus ancien d'abord
+        const uint64_t id = ctx->next_snapshot++;
+        ctx->snapshots.emplace(id, ctx->model);
+        *snapshot_id = id;
+        return QSID_OK;
+    } catch (const std::exception &) {
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+int qsid_scene_restore(qsid_ctx *ctx, uint64_t snapshot_id)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    const auto it = ctx->snapshots.find(snapshot_id);
+    if (it == ctx->snapshots.end())
+        return QSID_ERR_ARG;
+    try {
+        ctx->print.reset();
+        ctx->model = it->second;   // copie : l'instantané reste utilisable
+        ctx->has_result = false;
+        return QSID_OK;
+    } catch (const std::exception &) {
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+int qsid_scene_discard_snapshot(qsid_ctx *ctx, uint64_t snapshot_id)
+{
+    QSID_REQUIRE_CTX(ctx);
+    return ctx->snapshots.erase(snapshot_id) ? QSID_OK : QSID_ERR_ARG;
+}
+
 // ============================================================ Coupe, simplification
 
 int qsid_scene_cut(qsid_ctx *ctx, uint64_t object_id, int instance,

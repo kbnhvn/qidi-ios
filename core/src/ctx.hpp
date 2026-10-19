@@ -74,6 +74,11 @@ struct qsid_ctx {
     /* Filament de chaque extrudeur (impression multi-couleur / QIDI Box) ; vide ou 1 élément =
      * un seul extrudeur. Réappliqué quand on change de preset. */
     std::vector<std::string>                 extruder_filaments;
+    /* Instantanés de la scène (annuler/rétablir des opérations qui changent la structure :
+     * coupe, simplification, suppression, réglages par objet…). Les maillages sont partagés
+     * (shared_ptr) : un instantané ne coûte presque rien. */
+    std::map<uint64_t, Slic3r::Model>        snapshots;
+    uint64_t                                 next_snapshot = 1;
     /* Print du dernier slicing : Print::apply n'invalide que ce qui change. */
     std::unique_ptr<Slic3r::Print>           print;
     Slic3r::GCodeProcessorResult             last_result;

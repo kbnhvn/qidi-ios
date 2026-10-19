@@ -181,6 +181,7 @@ final class SlicerModel: ObservableObject {
         }
         Task {
             do {
+                resetHistory()
                 try await onEngine { try $0.clearScene() }
                 meshes.removeAll()
                 if overridesBeforeCalibration == nil { overridesBeforeCalibration = overrides }
@@ -406,11 +407,21 @@ final class SlicerModel: ObservableObject {
     private var workDirectory: URL { locations.workDirectory }
 
     private var core: SlicerCore?
-    private let engineQueue = DispatchQueue(label: "qsid.engine", qos: .userInitiated)
+    /// Trace de la progression du slicing : survit à un plantage et dit où l'app s'est arrêtée.
+    private lazy var breadcrumb = SliceBreadcrumb(url: workDirectory.appendingPathComponent("slice-breadcrumb.txt"))
+    /// Fil dédié, à grande pile : un thread secondaire de GCD n'a que 512 Ko sous iOS.
+    private let engineQueue = EngineThread(name: "qsid.engine")
     private var gcodeMoves: [GCodeMove] = []
     /// Chaque entrée est un groupe : un geste sur plusieurs objets s'annule en une fois.
-    private var undoStack: [[TransformSnapshot]] = []
-    private var redoStack: [[TransformSnapshot]] = []
+    private var undoStack: [UndoEntry] = []
+    private var redoStack: [UndoEntry] = []
+
+    /// Une entrée d'historique : un groupe de transformations, ou un instantané complet de la scène
+    /// (coupe, simplification, suppression, réglages par objet… tout ce qui change la structure).
+    private enum UndoEntry {
+        case transforms([TransformSnapshot])
+        case scene(UInt64)
+    }
     private var overridesSyncTask: Task<Void, Never>?
     private var rebuildTask: Task<Void, Never>?
     private var isRestoring = false
@@ -434,6 +445,9 @@ final class SlicerModel: ObservableObject {
             core = try SlicerCore(resourcesDirectory: resourcesDirectory, dataDirectory: dataDirectory)
         } catch {
             errorMessage = error.localizedDescription
+        }
+        if let stage = breadcrumb.interruptedStage() {
+            errorMessage = L10n.t("Le dernier slicing s'est interrompu brutalement. Dernière étape : ") + stage
         }
         Task { await bootstrap() }
     }
@@ -798,12 +812,7 @@ final class SlicerModel: ObservableObject {
                                               rotationDeg: c.rotationDeg, scale: c.scale, dropToBed: c.dropToBed)
                     }
                 }
-                if recordUndo {
-                    undoStack.append(before)
-                    if undoStack.count > 100 { undoStack.removeFirst() }
-                    redoStack.removeAll()
-                    updateUndoFlags()
-                }
+                if recordUndo { record(.transforms(before)) }
                 await refreshScene()
                 markStale()
             } catch {
@@ -813,16 +822,75 @@ final class SlicerModel: ObservableObject {
         }
     }
 
+    /// Ajoute une entrée à l'historique ; toute nouvelle action invalide le « rétablir ».
+    private func record(_ entry: UndoEntry) {
+        undoStack.append(entry)
+        if undoStack.count > 60 {
+            if case .scene(let id) = undoStack.removeFirst() { discardSnapshotInBackground(id) }
+        }
+        dropRedoHistory()
+        updateUndoFlags()
+    }
+
+    /// Oublie tout l'historique (plateau vidé, début d'une calibration).
+    private func resetHistory() {
+        for case .scene(let id) in undoStack { discardSnapshotInBackground(id) }
+        undoStack.removeAll()
+        dropRedoHistory()
+        updateUndoFlags()
+    }
+
+    private func dropRedoHistory() {
+        for case .scene(let id) in redoStack { discardSnapshotInBackground(id) }
+        redoStack.removeAll()
+    }
+
+    private func discardSnapshotInBackground(_ id: UInt64) {
+        Task { try? await onEngine { $0.discardSnapshot(id) } }
+    }
+
     func undo() {
-        guard let group = undoStack.popLast() else { updateUndoFlags(); return }
-        redoStack.append(group.compactMap(currentSnapshot(matching:)))
-        restore(group)
+        guard let entry = undoStack.popLast() else { updateUndoFlags(); return }
+        switch entry {
+        case .transforms(let group):
+            redoStack.append(.transforms(group.compactMap(currentSnapshot(matching:))))
+            restore(group)
+        case .scene(let id):
+            swapScene(restoring: id, ontoRedo: true)
+        }
     }
 
     func redo() {
-        guard let group = redoStack.popLast() else { updateUndoFlags(); return }
-        undoStack.append(group.compactMap(currentSnapshot(matching:)))
-        restore(group)
+        guard let entry = redoStack.popLast() else { updateUndoFlags(); return }
+        switch entry {
+        case .transforms(let group):
+            undoStack.append(.transforms(group.compactMap(currentSnapshot(matching:))))
+            restore(group)
+        case .scene(let id):
+            swapScene(restoring: id, ontoRedo: false)
+        }
+    }
+
+    /// Restaure l'instantané `id` en gardant l'état actuel de côté pour revenir en arrière.
+    private func swapScene(restoring id: UInt64, ontoRedo: Bool) {
+        updateUndoFlags()
+        Task {
+            do {
+                let current = try await onEngine { core -> UInt64 in
+                    let current = try core.snapshotScene()
+                    try core.restoreScene(id)
+                    core.discardSnapshot(id)
+                    return current
+                }
+                if ontoRedo { redoStack.append(.scene(current)) } else { undoStack.append(.scene(current)) }
+                meshes.removeAll()   // un maillage peut avoir changé (simplification)
+                await refreshScene()
+                markStale()
+            } catch {
+                errorMessage = L10n.t("Impossible d'annuler : ") + error.localizedDescription
+            }
+            updateUndoFlags()
+        }
     }
 
     /// État actuel de l'instance visée par `snap` (pour pouvoir y revenir : rétablir / annuler).
@@ -939,9 +1007,13 @@ final class SlicerModel: ObservableObject {
         cutPlane = nil
         Task {
             do {
-                let result = try await onEngine {
-                    try $0.cut(objectID: id, point: point, normal: normal, keep: keep.rawValue, placeOnCut: placeOnCut)
+                let (result, snapshot) = try await onEngine { core -> (SceneCutResult, UInt64) in
+                    let snapshot = try core.snapshotScene()
+                    do {
+                        return (try core.cut(objectID: id, point: point, normal: normal, keep: keep.rawValue, placeOnCut: placeOnCut), snapshot)
+                    } catch { core.discardSnapshot(snapshot); throw error }
                 }
+                record(.scene(snapshot))
                 await refreshScene()
                 selectedObjectIDs = Set(result.objects)
                 primaryObjectID = result.objects.first
@@ -961,7 +1033,12 @@ final class SlicerModel: ObservableObject {
     func simplify(objectID: UInt64, ratio: Double) {
         Task {
             do {
-                let result = try await onEngine { try $0.simplify(objectID: objectID, ratio: ratio) }
+                let (result, snapshot) = try await onEngine { core -> (SceneSimplifyResult, UInt64) in
+                    let snapshot = try core.snapshotScene()
+                    do { return (try core.simplify(objectID: objectID, ratio: ratio), snapshot) }
+                    catch { core.discardSnapshot(snapshot); throw error }
+                }
+                record(.scene(snapshot))
                 meshes[objectID] = nil   // le maillage a changé : rechargé par refreshScene
                 await refreshScene()
                 statusLine = String(format: L10n.t("Maillage simplifié : %ld → %ld triangles."), result.before, result.after)
@@ -1057,17 +1134,27 @@ final class SlicerModel: ObservableObject {
     }
 
     func clearScene() {
-        mutateScene { try $0.clearScene() }
+        resetHistory()
+        mutateScene(undoable: false) { try $0.clearScene() }
         selectedObjectID = nil
         meshes.removeAll()
         output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []; usedExtruders = []
         gcodeMeshGeneration += 1
     }
 
-    private func mutateScene(_ work: @escaping (SlicerCore) throws -> Void) {
+    /// Exécute une opération sur la scène. `undoable` : un instantané est pris avant, pour pouvoir annuler.
+    private func mutateScene(undoable: Bool = true, _ work: @escaping (SlicerCore) throws -> Void) {
         Task {
             do {
-                try await onEngine(work)
+                let snapshot: UInt64? = try await onEngine { core in
+                    let id = undoable ? try core.snapshotScene() : nil
+                    do { try work(core) } catch {
+                        if let id { core.discardSnapshot(id) }
+                        throw error
+                    }
+                    return id
+                }
+                if let snapshot { record(.scene(snapshot)) }
                 await refreshScene()
                 markStale()
             } catch {
@@ -1119,6 +1206,8 @@ final class SlicerModel: ObservableObject {
 
         // Vignettes de l'aperçu de l'imprimante : rendues depuis la scène telle qu'elle est.
         let thumbnails = makeThumbnailProvider()
+        let crumb = breadcrumb
+        crumb.begin(summary: "\(scene?.objects.count ?? 0) objet(s), \(extruderCount) filament(s)")
 
         Task {
             defer { relay.stop() }
@@ -1130,10 +1219,13 @@ final class SlicerModel: ObservableObject {
             defer { keepAwake.end() }
             do {
                 let result = try await onEngine { core -> (SliceSummary, [GCodeMove]) in
+                    crumb.note(percent: -1, text: "préparation du moteur")
                     core.setThumbnailProvider(thumbnails)
                     let summary = try core.sliceScene(output: outputURL) { percent, text in
                         relay.push(percent: Int(percent), text: text)
+                        crumb.note(percent: Int(percent), text: text)
                     }
+                    crumb.note(percent: 100, text: "lecture des mouvements du G-code")
                     let moves = try core.gcodeMoves().map(GCodeMove.init)
                     core.releaseResult()   // les mouvements sont chez nous : le moteur les libère
                     return (summary, moves)
@@ -1150,15 +1242,20 @@ final class SlicerModel: ObservableObject {
                 progressText = "Terminé"
                 statusLine = "Terminé en \(String(format: "%.1f", Date().timeIntervalSince(started))) s"
                 if let warning = result.0.warnings.first { errorMessage = warning }
+                crumb.note(percent: 100, text: "construction et affichage de l'aperçu 3D")
                 rebuildPreview()
                 workspace = .preview
                 successTick += 1
+                // l'aperçu 3D est dessiné juste après : la trace reste quelques secondes pour couvrir un plantage de l'affichage
+                Task { try? await Task.sleep(nanoseconds: 4_000_000_000); crumb.end() }
             } catch SlicerCoreError.canceled {
+                crumb.end()
                 errorTick += 1
                 statusLine = L10n.t("Slicing annulé.")
                 progress = 0
                 progressText = ""
             } catch {
+                crumb.end()
                 errorMessage = error.localizedDescription
                 statusLine = nil
                 errorTick += 1
@@ -1175,7 +1272,7 @@ final class SlicerModel: ObservableObject {
         var items: [ThumbnailProvider.Item] = []
         for object in objects {
             guard let triangles = meshes[object.id], !triangles.isEmpty else { continue }
-            items.append(.init(triangles: triangles, matrices: object.instances.map { BedSceneCoordinator.simdMatrix($0.matrix) }))
+            items.append(.init(triangles: triangles, matrices: object.instances.map(\.matrix)))
             for i in object.instances {
                 lo = Vec3(Swift.min(lo.x, i.min[0]), Swift.min(lo.y, i.min[1]), Swift.min(lo.z, i.min[2]))
                 hi = Vec3(Swift.max(hi.x, i.max[0]), Swift.max(hi.y, i.max[1]), Swift.max(hi.z, i.max[2]))
