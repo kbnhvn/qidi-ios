@@ -8,6 +8,7 @@
  */
 #include "qidislice.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -60,10 +61,11 @@ bool vec3_after(const std::string &json, const std::string &key, double out[3], 
     return true;
 }
 
-std::string take(char *p)
+std::string take(char *&p)
 {
     std::string s = p ? p : "";
     qsid_free(p);
+    p = nullptr;
     return s;
 }
 
@@ -74,6 +76,29 @@ uint64_t first_id(const std::string &added_json)
 }
 
 } // namespace
+
+
+/* Sphère UV (STL ASCII) : de quoi vérifier la simplification. */
+static void write_sphere_stl(const std::string &path, double r, int seg, int rings)
+{
+    std::ofstream out(path);
+    out << "solid sphere\n";
+    auto pt = [&](int i, int j) {
+        const double th = M_PI * j / rings, ph = 2 * M_PI * (i % seg) / seg;
+        return std::array<double, 3>{r * std::sin(th) * std::cos(ph), r * std::sin(th) * std::sin(ph), r * std::cos(th)};
+    };
+    auto tri = [&](std::array<double, 3> a, std::array<double, 3> b, std::array<double, 3> c) {
+        out << "facet normal 0 0 0\nouter loop\n";
+        for (auto &v : {a, b, c}) out << "vertex " << v[0] << " " << v[1] << " " << v[2] << "\n";
+        out << "endloop\nendfacet\n";
+    };
+    for (int j = 0; j < rings; ++j)
+        for (int i = 0; i < seg; ++i) {
+            if (j > 0)           tri(pt(i, j), pt(i + 1, j), pt(i, j + 1));
+            if (j < rings - 1)   tri(pt(i + 1, j), pt(i + 1, j + 1), pt(i, j + 1));
+        }
+    out << "endsolid sphere\n";
+}
 
 /* Fournisseur de vignettes factice : damier (remplit RGBA, lignes de haut en bas). */
 static int g_thumb_calls = 0;
@@ -376,6 +401,157 @@ int main(int argc, char **argv)
         }
         check(m221 >= nobj - 1, "M221 entre les objets", std::to_string(m221));
         qsid_config_reset(ctx, nullptr);
+    }
+
+
+    // ---- coupe, simplification, réglages par objet (ABI v3.1)
+    {
+        std::printf("réglages par objet, modificateurs, coupe, simplification\n");
+        auto slice_g = [&](const char *name, double *layers = nullptr, std::string *summary_out = nullptr) {
+            char *summary = nullptr;
+            const int r = qsid_slice_scene(ctx, (outdir + "/" + name).c_str(), nullptr, nullptr, &summary, err, sizeof(err));
+            std::string sm = take(summary);
+            if (r != QSID_OK) { std::printf("    slicing: %s\n", err); return -1.0; }
+            if (layers) *layers = number_after(sm, "\"layers\":");
+            if (summary_out) *summary_out = sm;
+            return number_after(sm, "\"filament_g\":");
+        };
+
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        check(qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err)) == QSID_OK, "cube importé", err);
+        const uint64_t oid = first_id(take(json));
+        double layers0 = 0;
+        const double g0 = slice_g("po0.gcode", &layers0);
+        check(g0 > 0, "référence slicée", std::to_string(g0));
+
+        // réglage de l'objet : remplissage 100 %
+        check(qsid_object_config_set(ctx, oid, 0, "fill_density", "100%", err, sizeof(err)) == QSID_OK, "fill_density 100% (objet)", err);
+        check(qsid_object_config_set(ctx, oid, 0, "no_such_option", "1", err, sizeof(err)) == QSID_ERR_ARG, "option inconnue refusée");
+        check(qsid_object_config_set(ctx, oid, 0, "bed_temperature", "60", err, sizeof(err)) == QSID_ERR_ARG,
+              "option globale (hors objet) refusée", err);
+        check(qsid_object_config_set(ctx, oid, 0, "fill_density", "abc", err, sizeof(err)) == QSID_ERR_ARG, "valeur invalide refusée");
+        check(qsid_scene_info(ctx, &json) == QSID_OK, "état avec réglage objet");
+        std::string oi = take(json);
+        check(contains(oi, "\"config\":{\"fill_density\":\"100%\"}"), "le réglage est exposé dans l'état", oi.substr(0, 300));
+        const double g100 = slice_g("po100.gcode");
+        check(g100 > g0 * 1.3, "le remplissage 100 % de l'objet consomme plus de filament",
+              std::to_string(g0) + " -> " + std::to_string(g100));
+        check(qsid_object_config_reset(ctx, oid, 0, "fill_density") == QSID_OK, "réglage retiré");
+        const double g0b = slice_g("po0b.gcode");
+        check(std::fabs(g0b - g0) < 0.01, "retour à la référence", std::to_string(g0b));
+
+        // modificateur : boîte au centre, remplissage 100 %
+        const double centre[3] = {0, 0, 0}, size_bad[3] = {0, 5, 5};
+        double bb_min[3], bb_max[3];
+        qsid_scene_info(ctx, &json);
+        std::string si = take(json);
+        vec3_after(si, "\"min\":", bb_min);
+        vec3_after(si, "\"max\":", bb_max);
+        const double mid[3] = {(bb_min[0] + bb_max[0]) / 2, (bb_min[1] + bb_max[1]) / 2, (bb_min[2] + bb_max[2]) / 2};
+        const double msize[3] = {12, 12, 12};
+        check(qsid_object_add_modifier(ctx, oid, "box", 0, centre, size_bad, &json, err, sizeof(err)) == QSID_ERR_ARG, "taille nulle refusée");
+        check(qsid_object_add_modifier(ctx, oid, "pyramid", 0, mid, msize, &json, err, sizeof(err)) == QSID_ERR_ARG, "forme inconnue refusée");
+        check(qsid_object_add_modifier(ctx, oid, "box", 0, mid, msize, &json, err, sizeof(err)) == QSID_OK, "modificateur boîte ajouté", err);
+        std::string mj = take(json);
+        const uint64_t vid = static_cast<uint64_t>(number_after(mj, "\"volume_id\":"));
+        check(vid != 0, "identifiant du modificateur");
+        check(qsid_object_config_set(ctx, oid, vid, "fill_density", "100%", err, sizeof(err)) == QSID_OK, "fill_density 100% (modificateur)", err);
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        check(contains(si, "\"kind\":\"modifier\"") && contains(si, "\"name\":\"box\""), "le modificateur est dans l'état");
+        const double gmod = slice_g("pomod.gcode");
+        check(gmod > g0 + 0.3 && gmod < g100, "le modificateur ne renforce que sa zone",
+              std::to_string(g0) + " < " + std::to_string(gmod) + " < " + std::to_string(g100));
+        const double msize2[3] = {4, 4, 4};
+        check(qsid_object_set_modifier(ctx, oid, vid, nullptr, msize2) == QSID_OK, "modificateur redimensionné");
+        const double gmod2 = slice_g("pomod2.gcode");
+        check(gmod2 < gmod && gmod2 > g0, "plus petit = moins de filament",
+              std::to_string(gmod2) + " vs " + std::to_string(gmod));
+        check(qsid_object_remove_volume(ctx, oid, vid) == QSID_OK, "modificateur supprimé");
+        check(qsid_object_remove_volume(ctx, oid, vid) == QSID_ERR_ARG, "suppression redoublée refusée");
+
+        // plage de couches : 0,1 mm entre 5 et 10 mm
+        check(qsid_layer_range_set(ctx, oid, 5, 10, "layer_height", "0.1", err, sizeof(err)) == QSID_OK, "plage 5–10 mm à 0,1 mm", err);
+        check(qsid_layer_range_set(ctx, oid, 8, 12, "layer_height", "0.1", err, sizeof(err)) == QSID_ERR_ARG, "plage chevauchante refusée");
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        check(contains(si, "\"layer_ranges\":[{\"min\":5,\"max\":10"), "plage exposée dans l'état");
+        double layers1 = 0;
+        slice_g("polr.gcode", &layers1);
+        check(layers1 > layers0 + 15, "plus de couches avec la plage fine", std::to_string(layers0) + " -> " + std::to_string(layers1));
+        check(qsid_layer_range_remove(ctx, oid, 5, 10, nullptr) == QSID_OK, "plage supprimée");
+        double layers2 = 0;
+        slice_g("polr2.gcode", &layers2);
+        check(std::fabs(layers2 - layers0) < 0.5, "retour au nombre de couches initial");
+
+        // coupe
+        const double plane_pt[3] = {0, 0, 30}, up[3] = {0, 0, 1}, side[3] = {1, 0, 0};
+        double pt_world[3] = {mid[0], mid[1], 10};
+        check(qsid_scene_cut(ctx, oid, 0, plane_pt, up, 3, 0, &json, err, sizeof(err)) == QSID_ERR_ARG, "plan hors de l'objet refusé", err);
+        take(json);
+        check(qsid_scene_cut(ctx, oid, 0, pt_world, up, 0, 0, &json, err, sizeof(err)) == QSID_ERR_ARG, "rien à garder : refusé");
+        check(qsid_scene_cut(ctx, oid, 0, pt_world, up, 3, 0, &json, err, sizeof(err)) == QSID_OK, "coupe à z = 10", err);
+        std::string cj = take(json);
+        check(contains(cj, "\"objects\":["), "objets issus de la coupe", cj);
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        size_t nobj2 = 0;
+        for (size_t p = si.find("\"local_min\""); p != std::string::npos; p = si.find("\"local_min\"", p + 1)) ++nobj2;
+        check(nobj2 == 2, "deux objets après la coupe", std::to_string(nobj2));
+        check(!contains(si, "\"outside\":true"), "les moitiés sont dans le volume d'impression");
+        check(qsid_scene_info(ctx, &json) == QSID_OK, "état");
+        si = take(json);
+        // hauteurs : chaque moitié ≈ 10 mm
+        size_t pos = 0;
+        int good = 0;
+        for (int k = 0; k < 2; ++k) {
+            double mn[3], mx[3];
+            const size_t inst = si.find("\"instances\"", pos);
+            if (inst == std::string::npos) break;
+            vec3_after(si, "\"min\":", mn, inst);
+            vec3_after(si, "\"max\":", mx, inst);
+            if (std::fabs((mx[2] - mn[2]) - 10.0) < 0.05 && std::fabs(mn[2]) < 1e-3) ++good;
+            pos = inst + 1;
+        }
+        check(good == 2, "chaque moitié mesure 10 mm et repose sur le plateau", std::to_string(good));
+        const double gcut = slice_g("pocut.gcode");
+        check(gcut > 0 && std::fabs(gcut - g0) < g0 * 0.35, "les deux moitiés se slicent", std::to_string(gcut));
+
+        // coupe inclinée, garde seulement le dessus
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err));
+        const uint64_t oid2 = first_id(take(json));
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        vec3_after(si, "\"min\":", bb_min);
+        vec3_after(si, "\"max\":", bb_max);
+        double c2[3] = {(bb_min[0] + bb_max[0]) / 2, (bb_min[1] + bb_max[1]) / 2, 10};
+        check(qsid_scene_cut(ctx, oid2, 0, c2, side, 1, 1, &json, err, sizeof(err)) == QSID_OK, "coupe verticale, dessus seul, à plat", err);
+        take(json);
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        nobj2 = 0;
+        for (size_t p = si.find("\"local_min\""); p != std::string::npos; p = si.find("\"local_min\"", p + 1)) ++nobj2;
+        check(nobj2 == 1, "un seul objet gardé", std::to_string(nobj2));
+
+        // simplification
+        const std::string sph = outdir + "/sphere.stl";
+        write_sphere_stl(sph, 10.0, 48, 24);
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        check(qsid_scene_add(ctx, sph.c_str(), &json, err, sizeof(err)) == QSID_OK, "sphère importée", err);
+        const uint64_t sid = first_id(take(json));
+        check(qsid_scene_simplify(ctx, sid, 1.5, &json, err, sizeof(err)) == QSID_ERR_ARG, "ratio invalide refusé");
+        check(qsid_scene_simplify(ctx, sid, 0.25, &json, err, sizeof(err)) == QSID_OK, "simplification à 25 %", err);
+        std::string sj = take(json);
+        const double before = number_after(sj, "\"before\":"), after = number_after(sj, "\"after\":");
+        std::printf("    triangles : %.0f -> %.0f\n", before, after);
+        check(before > 1000 && after < before * 0.4 && after > 50, "moins de triangles");
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        check(std::fabs(number_after(si, "\"triangles\":") - after) < 1, "l'état reflète le nouveau maillage");
+        check(contains(si, "\"outside\":false"), "toujours dans le volume d'impression");
+        const double gs = slice_g("posphere.gcode");
+        check(gs > 0, "la sphère simplifiée se slice", std::to_string(gs));
     }
 
     std::printf("scène vide\n");

@@ -206,6 +206,59 @@ QSID_EXPORT int qsid_scene_drop_to_bed(qsid_ctx *ctx, uint64_t object_id);
 QSID_EXPORT int qsid_scene_lay_on_face(qsid_ctx *ctx, uint64_t object_id, int instance,
                                        size_t triangle, char *err_msg, size_t err_len);
 
+/* ---- Coupe et simplification ---- */
+
+/* Coupe un objet par un plan (CutUtils : mêmes algorithmes que l'outil de coupe du
+ * bureau). `point` et `normal` sont en repère monde. keep : bit 0 = garder le dessus
+ * (côté de la normale), bit 1 = garder le dessous. place_on_cut != 0 : retourne chaque
+ * moitié pour poser la face coupée sur le plateau. L'objet d'origine est remplacé ;
+ * out_json = {"objects":[id…]}. QSID_ERR_ARG si le plan ne traverse pas l'objet. */
+QSID_EXPORT int qsid_scene_cut(qsid_ctx *ctx, uint64_t object_id, int instance,
+                               const double point[3], const double normal[3],
+                               int keep, int place_on_cut,
+                               char **out_json, char *err_msg, size_t err_len);
+
+/* Simplifie le maillage (décimation quadrique du bureau) pour garder environ
+ * `ratio` (0..1, exclu) des triangles. out_json = {"before":n,"after":m}. */
+QSID_EXPORT int qsid_scene_simplify(qsid_ctx *ctx, uint64_t object_id, double ratio,
+                                    char **out_json, char *err_msg, size_t err_len);
+
+/* ---- Réglages par objet, modificateurs, plages de couches ----
+ * Les options acceptées sont celles de PrintObjectConfig / PrintRegionConfig (et
+ * « extruder »), comme les réglages par objet du bureau. qsid_scene_info() les expose
+ * (objet : "config", "volumes", "layer_ranges"). */
+
+/* volume_id = 0 : réglage de l'objet ; sinon réglage du modificateur. */
+QSID_EXPORT int qsid_object_config_set(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id,
+                                       const char *key, const char *value,
+                                       char *err_msg, size_t err_len);
+/* key NULL : retire tous les réglages. */
+QSID_EXPORT int qsid_object_config_reset(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id,
+                                         const char *key);
+
+/* Ajoute un volume de paramètres : shape = "box" | "cylinder" | "sphere" ;
+ * blocker_kind 0 = modificateur, 1 = bloqueur de supports, 2 = forceur de supports.
+ * center_world en repère monde, size = dimensions (mm, repère de l'objet).
+ * out_json = {"volume_id":id}. */
+QSID_EXPORT int qsid_object_add_modifier(qsid_ctx *ctx, uint64_t object_id, const char *shape,
+                                         int blocker_kind, const double center_world[3],
+                                         const double size[3],
+                                         char **out_json, char *err_msg, size_t err_len);
+/* Déplace / redimensionne un modificateur (NULL = inchangé). */
+QSID_EXPORT int qsid_object_set_modifier(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id,
+                                         const double center_world[3], const double size[3]);
+/* Supprime un modificateur (les pièces du modèle ne sont pas supprimables). */
+QSID_EXPORT int qsid_object_remove_volume(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id);
+
+/* Plage de hauteurs [min_z, max_z] (mm) avec ses propres réglages. Crée la plage si
+ * besoin ; key/value (facultatifs) fixent un réglage. Refuse un chevauchement. */
+QSID_EXPORT int qsid_layer_range_set(qsid_ctx *ctx, uint64_t object_id, double min_z, double max_z,
+                                     const char *key, const char *value,
+                                     char *err_msg, size_t err_len);
+/* key NULL : supprime la plage entière ; sinon retire ce seul réglage. */
+QSID_EXPORT int qsid_layer_range_remove(qsid_ctx *ctx, uint64_t object_id,
+                                        double min_z, double max_z, const char *key);
+
 /* ---- Slicing de la scène ---- */
 
 /* Slice la scène avec la configuration effective. Le Print est conservé : un

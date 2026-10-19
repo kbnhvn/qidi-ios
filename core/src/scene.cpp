@@ -24,6 +24,9 @@
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/Geometry.hpp"
 #include "libslic3r/GCode/ThumbnailData.hpp"
+#include "libslic3r/CutUtils.hpp"
+#include "libslic3r/QuadricEdgeCollapse.hpp"
+#include "libslic3r/Slicing.hpp"
 #include <arrange-wrapper/ModelArrange.hpp>
 
 using qsid::set_err;
@@ -285,6 +288,115 @@ std::string build_summary(const Slic3r::Print &print, const Slic3r::GCodeProcess
         out += (first ? "" : ",") + jstr("Sequential printing collision");
     out += "]}";
     return out;
+}
+
+// ---------------------------------------------------------------- réglages par objet
+
+std::string model_config_json(const Slic3r::ModelConfig &cfg)
+{
+    std::string out = "{";
+    bool first = true;
+    for (const std::string &key : cfg.keys()) {
+        out += (first ? "" : ",") + jstr(key) + ":" + jstr(cfg.opt_serialize(key));
+        first = false;
+    }
+    return out + "}";
+}
+
+/* Clés acceptées en réglage par objet / par modificateur / par plage de couches : celles
+ * de PrintObjectConfig et PrintRegionConfig (comme les catégories de l'interface
+ * de bureau), plus l'extrudeur. */
+bool per_object_key(const std::string &key)
+{
+    if (key == "extruder")
+        return true;
+    return Slic3r::PrintObjectConfig::defaults().has(key) || Slic3r::PrintRegionConfig::defaults().has(key);
+}
+
+Slic3r::ModelVolume *find_volume(Slic3r::ModelObject *o, uint64_t id)
+{
+    for (Slic3r::ModelVolume *v : o->volumes)
+        if (v->id().id == id)
+            return v;
+    return nullptr;
+}
+
+const char *volume_kind(const Slic3r::ModelVolume *v)
+{
+    switch (v->type()) {
+    case Slic3r::ModelVolumeType::MODEL_PART:         return "part";
+    case Slic3r::ModelVolumeType::PARAMETER_MODIFIER: return "modifier";
+    case Slic3r::ModelVolumeType::SUPPORT_BLOCKER:    return "blocker";
+    case Slic3r::ModelVolumeType::SUPPORT_ENFORCER:   return "enforcer";
+    default:                                          return "other";
+    }
+}
+
+bool set_model_config(Slic3r::ModelConfig &cfg, const char *key, const char *value, std::string &err)
+{
+    if (!per_object_key(key)) {
+        err = std::string("option not available per object: ") + key;
+        return false;
+    }
+    try {
+        Slic3r::DynamicPrintConfig probe = Slic3r::DynamicPrintConfig::full_print_config();
+        Slic3r::ConfigSubstitutionContext sc{Slic3r::ForwardCompatibilitySubstitutionRule::Disable};
+        probe.set_deserialize(key, value, sc);
+        cfg.set_deserialize(key, probe.opt_serialize(key), sc);
+        return true;
+    } catch (const std::exception &e) {
+        err = e.what();
+        return false;
+    }
+}
+
+std::string object_volumes_json(const Slic3r::ModelObject *o)
+{
+    std::string out = "[";
+    bool first = true;
+    for (const Slic3r::ModelVolume *v : o->volumes) {
+        const Slic3r::BoundingBoxf3 bb = v->mesh().bounding_box();
+        const Slic3r::Vec3d size = bb.size().cwiseProduct(v->get_scaling_factor());
+        out += (first ? "" : ",") + std::string("{\"id\":") + std::to_string(v->id().id);
+        first = false;
+        out += ",\"name\":" + jstr(v->name);
+        out += ",\"kind\":" + jstr(volume_kind(v));
+        out += ",\"offset\":" + jvec(v->get_offset());
+        out += ",\"size\":" + jvec(size);
+        out += ",\"triangles\":" + std::to_string(v->mesh().its.indices.size());
+        out += ",\"config\":" + model_config_json(v->config) + "}";
+    }
+    return out + "]";
+}
+
+std::string layer_ranges_json(const Slic3r::ModelObject *o)
+{
+    std::string out = "[";
+    bool first = true;
+    for (const auto &kv : o->layer_config_ranges) {
+        out += (first ? "" : ",") + std::string("{\"min\":") + jnum(kv.first.first) +
+               ",\"max\":" + jnum(kv.first.second) + ",\"config\":" + model_config_json(kv.second) + "}";
+        first = false;
+    }
+    return out + "]";
+}
+
+/* Place les `fresh` autour du centre du plateau, sur la première place libre. */
+void relocate_fresh(qsid_ctx *ctx, const std::vector<Slic3r::ModelObject *> &fresh, const Slic3r::DynamicPrintConfig &cfg)
+{
+    const BedInfo bed = bed_info(cfg);
+    for (Slic3r::ModelObject *o : fresh) {
+        o->ensure_on_bed();
+        for (Slic3r::ModelInstance *inst : o->instances) {
+            Slic3r::Vec3d off = inst->get_offset();
+            off.x() = bed.box.center().x();
+            off.y() = bed.box.center().y();
+            inst->set_offset(off);
+        }
+        o->invalidate_bounding_box();
+    }
+    if (!place_without_overlap(ctx->model, fresh, bed, std::max(Slic3r::min_object_distance(cfg), 2.0)))
+        arrange_all(ctx, cfg);
 }
 
 } // namespace
@@ -755,6 +867,9 @@ int qsid_scene_info(qsid_ctx *ctx, char **out_json)
         out += "{\"id\":" + std::to_string(o->id().id);
         out += ",\"name\":" + jstr(o->name);
         out += ",\"triangles\":" + std::to_string(triangles);
+        out += ",\"config\":" + model_config_json(o->config);
+        out += ",\"volumes\":" + object_volumes_json(o);
+        out += ",\"layer_ranges\":" + layer_ranges_json(o);
         out += ",\"local_min\":" + jvec(local.min) + ",\"local_max\":" + jvec(local.max);
         out += ",\"instances\":[";
         for (size_t i = 0; i < o->instances.size(); ++i) {
@@ -929,6 +1044,317 @@ int qsid_scene_lay_on_face(qsid_ctx *ctx, uint64_t object_id, int instance, size
     inst->set_transformation(Slic3r::Geometry::Transformation(m));
     o->invalidate_bounding_box();
     o->ensure_on_bed();
+    return QSID_OK;
+}
+
+
+// ============================================================ Coupe, simplification
+
+int qsid_scene_cut(qsid_ctx *ctx, uint64_t object_id, int instance,
+                   const double point[3], const double normal[3], int keep, int place_on_cut,
+                   char **out_json, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || !point || !normal || instance < 0 || static_cast<size_t>(instance) >= o->instances.size() || !(keep & 3))
+        return QSID_ERR_ARG;
+    const Slic3r::Vec3d n(normal[0], normal[1], normal[2]);
+    if (n.norm() < 1e-9) {
+        set_err(err_msg, err_len, "null cut-plane normal");
+        return QSID_ERR_ARG;
+    }
+    try {
+        using Attr = Slic3r::ModelObjectCutAttribute;
+        Slic3r::ModelObjectCutAttributes attrs{};
+        if (keep & 1) attrs = attrs | Attr::KeepUpper;
+        if (keep & 2) attrs = attrs | Attr::KeepLower;
+        if (place_on_cut) {
+            if (keep & 1) attrs = attrs | Attr::PlaceOnCutUpper;
+            if (keep & 2) attrs = attrs | Attr::PlaceOnCutLower;
+        }
+
+        // Même matrice que GLGizmoCut3D::get_cut_matrix : le plan est relatif à l'instance.
+        const Eigen::Quaterniond q = Eigen::Quaterniond::FromTwoVectors(Slic3r::Vec3d::UnitZ(), n.normalized());
+        Slic3r::Transform3d rot = Slic3r::Transform3d::Identity();
+        rot.rotate(q);
+        const Slic3r::Vec3d center = Slic3r::Vec3d(point[0], point[1], point[2]) - o->instances[instance]->get_offset();
+        const Slic3r::Transform3d cut_matrix = Slic3r::Geometry::translation_transform(center) * rot;
+
+        // Le plan doit traverser l'objet, sinon il n'y a rien à couper.
+        const Slic3r::BoundingBoxf3 bb = o->instance_bounding_box(instance);
+        double lo = 1e300, hi = -1e300;
+        for (int i = 0; i < 8; ++i) {
+            const Slic3r::Vec3d c(i & 1 ? bb.max.x() : bb.min.x(), i & 2 ? bb.max.y() : bb.min.y(), i & 4 ? bb.max.z() : bb.min.z());
+            const double d = (c - Slic3r::Vec3d(point[0], point[1], point[2])).dot(n.normalized());
+            lo = std::min(lo, d);
+            hi = std::max(hi, d);
+        }
+        if (!(lo < -1e-4 && hi > 1e-4)) {
+            set_err(err_msg, err_len, "the cut plane does not cross the object");
+            return QSID_ERR_ARG;
+        }
+
+        std::vector<Slic3r::ModelObject *> fresh;
+        std::string ids = "[";
+        {
+            Slic3r::Cut cut(o, instance, cut_matrix, attrs);
+            const Slic3r::ModelObjectPtrs &parts = cut.perform_with_plane();
+            if (parts.empty()) {
+                set_err(err_msg, err_len, "the cut produced no object");
+                return QSID_ERR_SLICE_FAILED;
+            }
+            for (const Slic3r::ModelObject *part : parts) {
+                Slic3r::ModelObject *added = ctx->model.add_object(*part);
+                fresh.push_back(added);
+                ids += (fresh.size() > 1 ? "," : "") + std::to_string(added->id().id);
+            }
+        }
+        ids += "]";
+
+        for (size_t i = 0; i < ctx->model.objects.size(); ++i)
+            if (ctx->model.objects[i] == o) {
+                ctx->model.delete_object(i);
+                break;
+            }
+        ctx->print.reset();
+        relocate_fresh(ctx, fresh, effective_config(ctx));
+
+        if (out_json)
+            *out_json = dup_string("{\"objects\":" + ids + "}");
+        return QSID_OK;
+    } catch (const std::exception &e) {
+        set_err(err_msg, err_len, e.what());
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+int qsid_scene_simplify(qsid_ctx *ctx, uint64_t object_id, double ratio,
+                        char **out_json, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || !(ratio > 0.0 && ratio < 1.0))
+        return QSID_ERR_ARG;
+    try {
+        size_t before = 0, after = 0;
+        for (Slic3r::ModelVolume *v : o->volumes) {
+            if (!v->is_model_part())
+                continue;
+            indexed_triangle_set its = v->mesh().its;
+            before += its.indices.size();
+            const uint32_t target = std::max<uint32_t>(4, static_cast<uint32_t>(std::ceil(its.indices.size() * ratio)));
+            if (target < its.indices.size())
+                Slic3r::its_quadric_edge_collapse(its, target);
+            after += its.indices.size();
+            v->set_mesh(std::move(its));
+            v->calculate_convex_hull();
+            v->set_new_unique_id();
+        }
+        o->invalidate_bounding_box();
+        o->ensure_on_bed(true);
+        ctx->print.reset();
+        if (out_json)
+            *out_json = dup_string("{\"before\":" + std::to_string(before) + ",\"after\":" + std::to_string(after) + "}");
+        return QSID_OK;
+    } catch (const std::exception &e) {
+        set_err(err_msg, err_len, e.what());
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+// ============================================================ Réglages par objet
+
+int qsid_object_config_set(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id,
+                           const char *key, const char *value, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || !key || !*key || !value)
+        return QSID_ERR_ARG;
+    Slic3r::ModelConfig *cfg = &o->config;
+    if (volume_id) {
+        Slic3r::ModelVolume *v = find_volume(o, volume_id);
+        if (!v)
+            return QSID_ERR_ARG;
+        cfg = &v->config;
+    }
+    std::string err;
+    if (!set_model_config(*cfg, key, value, err)) {
+        set_err(err_msg, err_len, err);
+        return QSID_ERR_ARG;
+    }
+    return QSID_OK;
+}
+
+int qsid_object_config_reset(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id, const char *key)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o)
+        return QSID_ERR_ARG;
+    Slic3r::ModelConfig *cfg = &o->config;
+    if (volume_id) {
+        Slic3r::ModelVolume *v = find_volume(o, volume_id);
+        if (!v)
+            return QSID_ERR_ARG;
+        cfg = &v->config;
+    }
+    if (!key || !*key)
+        cfg->reset();
+    else
+        cfg->erase(key);
+    return QSID_OK;
+}
+
+int qsid_object_add_modifier(qsid_ctx *ctx, uint64_t object_id, const char *shape, int blocker_kind,
+                             const double center_world[3], const double size[3],
+                             char **out_json, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || !shape || !center_world || !size || o->instances.empty())
+        return QSID_ERR_ARG;
+    for (int i = 0; i < 3; ++i)
+        if (!(size[i] > 1e-3))
+            return QSID_ERR_ARG;
+    try {
+        // Forme unitaire centrée à l'origine ; la taille passe par l'échelle du volume.
+        Slic3r::TriangleMesh mesh;
+        const std::string s = shape;
+        if (s == "box") {
+            mesh = Slic3r::make_cube(1, 1, 1);
+            mesh.translate(-0.5f, -0.5f, -0.5f);
+        } else if (s == "cylinder") {
+            mesh = Slic3r::make_cylinder(0.5, 1.0);
+            mesh.translate(0.f, 0.f, -0.5f);
+        } else if (s == "sphere") {
+            mesh = Slic3r::make_sphere(0.5);
+        } else {
+            set_err(err_msg, err_len, "unknown shape: " + s);
+            return QSID_ERR_ARG;
+        }
+        const Slic3r::ModelVolumeType type = blocker_kind == 1 ? Slic3r::ModelVolumeType::SUPPORT_BLOCKER
+                                           : blocker_kind == 2 ? Slic3r::ModelVolumeType::SUPPORT_ENFORCER
+                                                               : Slic3r::ModelVolumeType::PARAMETER_MODIFIER;
+        Slic3r::ModelVolume *v = o->add_volume(std::move(mesh), type);
+        v->name = s;
+        const Slic3r::Vec3d local = o->instances.front()->get_matrix().inverse() *
+                                    Slic3r::Vec3d(center_world[0], center_world[1], center_world[2]);
+        v->set_offset(local);
+        v->set_scaling_factor(Slic3r::Vec3d(size[0], size[1], size[2]));
+        o->invalidate_bounding_box();
+        ctx->print.reset();
+        if (out_json)
+            *out_json = dup_string("{\"volume_id\":" + std::to_string(v->id().id) + "}");
+        return QSID_OK;
+    } catch (const std::exception &e) {
+        set_err(err_msg, err_len, e.what());
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+int qsid_object_set_modifier(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id,
+                             const double center_world[3], const double size[3])
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || o->instances.empty())
+        return QSID_ERR_ARG;
+    Slic3r::ModelVolume *v = find_volume(o, volume_id);
+    if (!v || v->is_model_part())
+        return QSID_ERR_ARG;
+    if (size) {
+        for (int i = 0; i < 3; ++i)
+            if (!(size[i] > 1e-3))
+                return QSID_ERR_ARG;
+        v->set_scaling_factor(Slic3r::Vec3d(size[0], size[1], size[2]));
+    }
+    if (center_world)
+        v->set_offset(o->instances.front()->get_matrix().inverse() *
+                      Slic3r::Vec3d(center_world[0], center_world[1], center_world[2]));
+    o->invalidate_bounding_box();
+    return QSID_OK;
+}
+
+int qsid_object_remove_volume(qsid_ctx *ctx, uint64_t object_id, uint64_t volume_id)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o)
+        return QSID_ERR_ARG;
+    for (size_t i = 0; i < o->volumes.size(); ++i)
+        if (o->volumes[i]->id().id == volume_id) {
+            if (o->volumes[i]->is_model_part())
+                return QSID_ERR_ARG;   // on ne supprime que modificateurs et blocs de support
+            o->delete_volume(i);
+            o->invalidate_bounding_box();
+            return QSID_OK;
+        }
+    return QSID_ERR_ARG;
+}
+
+int qsid_layer_range_set(qsid_ctx *ctx, uint64_t object_id, double min_z, double max_z,
+                         const char *key, const char *value, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o || !(min_z >= 0.0) || !(max_z > min_z + 1e-6))
+        return QSID_ERR_ARG;
+    const Slic3r::t_layer_height_range range(min_z, max_z);
+    // Pas de chevauchement avec une autre plage (comme l'interface de bureau).
+    for (const auto &kv : o->layer_config_ranges)
+        if (kv.first != range && kv.first.first < max_z - 1e-6 && kv.first.second > min_z + 1e-6) {
+            set_err(err_msg, err_len, "layer ranges overlap");
+            return QSID_ERR_ARG;
+        }
+    auto it = o->layer_config_ranges.find(range);
+    if (it == o->layer_config_ranges.end()) {
+        Slic3r::ModelConfig cfg;
+        std::string err;
+        if (key && *key && value && !set_model_config(cfg, key, value, err)) {
+            set_err(err_msg, err_len, err);
+            return QSID_ERR_ARG;
+        }
+        o->layer_config_ranges.emplace(range, std::move(cfg));
+    } else if (key && *key && value) {
+        std::string err;
+        if (!set_model_config(it->second, key, value, err)) {
+            set_err(err_msg, err_len, err);
+            return QSID_ERR_ARG;
+        }
+    }
+    o->layer_height_profile.clear();   // le profil manuel serait recalculé à partir des plages
+    ctx->print.reset();
+    return QSID_OK;
+}
+
+int qsid_layer_range_remove(qsid_ctx *ctx, uint64_t object_id, double min_z, double max_z, const char *key)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    Slic3r::ModelObject *o = find_object(ctx, object_id);
+    if (!o)
+        return QSID_ERR_ARG;
+    auto it = o->layer_config_ranges.find(Slic3r::t_layer_height_range(min_z, max_z));
+    if (it == o->layer_config_ranges.end())
+        return QSID_ERR_ARG;
+    if (key && *key) {
+        it->second.erase(key);
+        if (it->second.empty())
+            o->layer_config_ranges.erase(it);
+    } else {
+        o->layer_config_ranges.erase(it);
+    }
+    o->layer_height_profile.clear();
+    ctx->print.reset();
     return QSID_OK;
 }
 
