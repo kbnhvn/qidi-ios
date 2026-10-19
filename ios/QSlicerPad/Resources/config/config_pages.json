@@ -1,0 +1,2268 @@
+{
+ "tabs": [
+  {
+   "id": "print",
+   "title": "Réglages d'impression",
+   "pages": [
+    {
+     "title": "Layers and perimeters",
+     "groups": [
+      {
+       "title": "Layer height",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "layer_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_height"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Vertical shells",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "perimeters"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "spiral_vase"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Horizontal shells",
+       "lines": [
+        {
+         "label": "Solid layers",
+         "keys": [
+          "top_solid_layers",
+          "bottom_solid_layers"
+         ]
+        },
+        {
+         "label": "Minimum shell thickness",
+         "keys": [
+          "top_solid_min_thickness",
+          "bottom_solid_min_thickness"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Quality (slower slicing)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "extra_perimeters"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "extra_perimeters_on_overhangs"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ensure_vertical_shell_thickness"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "avoid_crossing_curled_overhangs"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "avoid_crossing_perimeters"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "avoid_crossing_perimeters_max_detour"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "thin_walls"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "thick_bridges"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhangs"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Advanced",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "seam_position"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "seam_gap_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "staggered_inner_seams"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_placement"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_only_on_smooth"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_start_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_entire_loop"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_length"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_max_segment_length"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "scarf_seam_on_inner_perimeters"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "external_perimeters_first"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "gap_fill_enabled"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "perimeter_generator"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Fuzzy skin (experimental)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "fuzzy_skin"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "fuzzy_skin_thickness"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "fuzzy_skin_point_dist"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Only one perimeter",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "top_one_perimeter_type"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "only_one_perimeter_first_layer"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Infill",
+     "groups": [
+      {
+       "title": "Infill",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "fill_density"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "fill_pattern"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_anchor"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_anchor_max"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "top_fill_pattern"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bottom_fill_pattern"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Ironing",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "ironing"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ironing_type"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ironing_pattern"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ironing_flowrate"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ironing_spacing"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Reducing printing time",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "automatic_infill_combination"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "automatic_infill_combination_max_layer_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_every_layers"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Advanced",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_every_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "fill_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_below_area"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bridge_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "only_retract_when_crossing_perimeters"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_first"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "detect_narrow_internal_solid_infill"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filter_top_gap_infill"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Skirt and brim",
+     "groups": [
+      {
+       "title": "Skirt",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "skirts"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "skirt_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "skirt_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "draft_shield"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "min_skirt_length"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Brim",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "brim_type"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "brim_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "brim_separation"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Support material",
+     "groups": [
+      {
+       "title": "Support material",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "support_material"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_auto"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_threshold"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_enforce_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "raft_first_layer_density"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "raft_first_layer_expansion"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Raft",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "raft_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "raft_contact_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "raft_expansion"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Options for support material and raft",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "support_material_style"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_contact_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_bottom_contact_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_pattern"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_with_sheath"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_spacing"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_closing_radius"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_bottom_interface_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_pattern"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_spacing"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_contact_loops"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_buildplate_only"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_xy_spacing"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "dont_support_bridges"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_synchronize_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "max_bridge_length"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Organic supports",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "support_tree_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_angle_slow"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_branch_diameter"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_branch_diameter_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_branch_diameter_double_wall"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_tip_diameter"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_branch_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_tree_top_rate"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Speed",
+     "groups": [
+      {
+       "title": "Speed for print moves",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "perimeter_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "small_perimeter_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "external_perimeter_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "top_solid_infill_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bridge_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "over_bridge_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "gap_fill_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "ironing_speed"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Dynamic overhang speed",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "enable_dynamic_overhang_speeds"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_speed_0"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_speed_1"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_speed_2"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_speed_3"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Resonance Avoidance",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "resonance_avoidance"
+         ]
+        },
+        {
+         "label": "Resonance Avoidance Speed",
+         "keys": [
+          "min_resonance_avoidance_speed",
+          "max_resonance_avoidance_speed"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Speed for non-print moves",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "travel_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "travel_speed_z"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Modifiers",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "first_layer_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_infill_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_travel_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_speed_over_raft"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "slow_down_layers"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Acceleration control (advanced)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "external_perimeter_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "perimeter_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "top_solid_infill_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bridge_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_acceleration_over_raft"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "travel_acceleration"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "default_acceleration"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Autospeed (advanced)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "max_print_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "max_volumetric_speed"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Pressure equalizer (experimental)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "max_volumetric_extrusion_rate_slope_positive"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "max_volumetric_extrusion_rate_slope_negative"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Multiple Extruders",
+     "groups": [
+      {
+       "title": "Extruders",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "perimeter_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_interface_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_extruder"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bed_temperature_extruder"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Ooze prevention",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "ooze_prevention"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "standby_temperature_delta"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Wipe tower",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_brim_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_bridging"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_cone_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_extra_spacing"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_extra_flow"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_tower_no_sparse_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "single_extruder_multi_material_priming"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Advanced",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "interface_shells"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "mmu_segmented_region_max_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "mmu_segmented_region_interlocking_depth"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_beam"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_beam_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_orientation"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_beam_layer_count"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_depth"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "interlocking_boundary_avoidance"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Advanced",
+     "groups": [
+      {
+       "title": "Extrusion width",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "first_layer_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "perimeter_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "external_perimeter_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "infill_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "solid_infill_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "top_infill_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "support_material_extrusion_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "automatic_extrusion_widths"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Overlap",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "infill_overlap"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Flow",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "bridge_flow_ratio"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "top_solid_infill_flow_ratio"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bottom_solid_infill_flow_ratio"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Slicing",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "slice_closing_radius"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "slicing_mode"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "resolution"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "gcode_resolution"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "arc_fitting"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "xy_hole_compensation"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "xy_contour_compensation"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "elefant_foot_compensation"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "elefant_foot_compensation_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "precise_z_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "precise_outer_wall"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Arachne perimeter generator",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "wall_transition_angle"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wall_transition_filter_deviation"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wall_transition_length"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wall_distribution_count"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "min_bead_width"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "min_feature_size"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Output options",
+     "groups": [
+      {
+       "title": "Sequential printing",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "complete_objects"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Output file",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "gcode_comments"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "gcode_label_objects"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "output_filename_format"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Post-processing scripts",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "post_process"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Notes",
+     "groups": [
+      {
+       "title": "Notes",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "notes"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Dependencies",
+     "groups": [
+      {
+       "title": "Profile dependencies",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "compatible_printers_condition"
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "filament",
+   "title": "Réglages du filament",
+   "pages": [
+    {
+     "title": "Filament",
+     "groups": [
+      {
+       "title": "Filament",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_colour"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_diameter"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "extrusion_multiplier"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_density"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_cost"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_spool_weight"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "enable_advance_pressure"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "advance_pressure"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "smooth_time"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Temperature",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "idle_temperature"
+         ]
+        },
+        {
+         "label": "Nozzle",
+         "keys": [
+          "first_layer_temperature",
+          "temperature",
+          "filament_flush_temp"
+         ]
+        },
+        {
+         "label": "Bed",
+         "keys": [
+          "first_layer_bed_temperature",
+          "bed_temperature"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "seal_print"
+         ]
+        },
+        {
+         "label": "Chamber",
+         "keys": [
+          "chamber_temperature",
+          "chamber_minimal_temperature"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "box_temperature"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Cooling",
+     "groups": [
+      {
+       "title": "Enable",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "fan_always_on"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "cooling"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Fan settings",
+       "lines": [
+        {
+         "label": "Fan speed",
+         "keys": [
+          "min_fan_speed",
+          "max_fan_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "bridge_fan_speed"
+         ]
+        },
+        {
+         "label": "Rapido Cooling Fan Speed",
+         "keys": [
+          "enable_auxiliary_fan",
+          "enable_auxiliary_fan_unseal"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "enable_volume_fan"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "disable_fan_first_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "disable_rapid_cooling_fan_first_layers"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "full_fan_speed_layer"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Dynamic fan speeds",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "enable_dynamic_fan_speeds"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_fan_speed_0"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_fan_speed_1"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_fan_speed_2"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "overhang_fan_speed_3"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Cooling thresholds",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "fan_below_layer_time"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "slowdown_below_layer_time"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "dont_slow_down_outer_wall"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "min_print_speed"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Advanced",
+     "groups": [
+      {
+       "title": "Filament properties",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_type"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_soluble"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_abrasive"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Print speed override",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_max_volumetric_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_infill_max_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_infill_max_crossing_speed"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Shrinkage compensation",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_shrinkage_compensation_xy"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_shrinkage_compensation_z"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Wipe tower parameters",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_minimal_purge_on_wipe_tower"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Toolchange parameters with single extruder MM printers",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_loading_speed_start"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_loading_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_unloading_speed_start"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_unloading_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_load_time"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_unload_time"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_toolchange_delay"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_cooling_moves"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_cooling_initial_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_cooling_final_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_stamping_loading_speed"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_stamping_distance"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_purge_multiplier"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Toolchange parameters with multi extruder MM printers",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_multitool_ramming"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_multitool_ramming_volume"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "filament_multitool_ramming_flow"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Custom G-code",
+     "groups": [
+      {
+       "title": "Start G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "start_filament_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "End G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "end_filament_gcode"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Notes",
+     "groups": [
+      {
+       "title": "Notes",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "filament_notes"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Dependencies",
+     "groups": [
+      {
+       "title": "Profile dependencies",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "compatible_printers_condition"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "compatible_prints_condition"
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "printer",
+   "title": "Réglages de l'imprimante",
+   "pages": [
+    {
+     "title": "General",
+     "groups": [
+      {
+       "title": "Size and coordinates",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "max_print_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "z_offset"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Capabilities",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "single_extruder_multi_material"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Firmware",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "gcode_flavor"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "thumbnails"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "silent_mode"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "remaining_times"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "binary_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Advanced",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "use_relative_e_distances"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "use_firmware_retraction"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "use_volumetric_e"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "variable_layer_height"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "prefer_clockwise_movements"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Sequential printing limits",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "extruder_clearance_radius"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "extruder_clearance_height"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Accessory",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "auxiliary_fan"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "chamber_fan"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "chamber_temperature_control"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "wipe_device"
+         ]
+        },
+        {
+         "label": "",
+         "keys": [
+          "box_temperature_control"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Custom G-code",
+     "groups": [
+      {
+       "title": "Start G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "start_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Start G-Code options",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "autoemit_temperature_commands"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "End G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "end_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Before layer change G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "before_layer_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "After layer change G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "layer_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Tool change G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "toolchange_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Between objects G-code (for sequential printing)",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "between_objects_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Color Change G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "color_change_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Pause Print G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "pause_print_gcode"
+         ]
+        }
+       ]
+      },
+      {
+       "title": "Template Custom G-code",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "template_custom_gcode"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "title": "Notes",
+     "groups": [
+      {
+       "title": "Notes",
+       "lines": [
+        {
+         "label": "",
+         "keys": [
+          "printer_notes"
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -11,7 +11,7 @@
  *   Slic3r::Print::export_gcode           (idem, utilisé par BackgroundSlicingProcess)
  *   Slic3r::PrintBase::set_status_callback / cancel / canceled (PrintBase.hpp)
  */
-#include "qidislice.h"
+#include "ctx.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -41,18 +41,6 @@
 
 namespace {
 
-std::string tail(const std::string &msg, size_t max = 480)
-{
-    return msg.size() <= max ? msg : "…" + msg.substr(msg.size() - max);
-}
-
-void set_err(char *err_msg, size_t err_len, const std::string &msg)
-{
-    if (!err_msg || err_len == 0)
-        return;
-    std::snprintf(err_msg, err_len, "%s", tail(msg).c_str());
-}
-
 /* Le cœur consomme un argv modifiable : buffers stables pendant tout l'appel. */
 struct Argv {
     std::vector<std::string> storage;
@@ -73,22 +61,6 @@ struct Argv {
 };
 
 } // namespace
-
-struct qsid_ctx {
-    std::string resources_dir;
-    std::string data_dir;
-    std::string prog_name = "qidi-slicer";
-    bool        initialized = false;
-
-    /* Annulation : le drapeau est lu par le callback de statut et par
-     * qsid_cancel(), qui peut appeler Print::cancel() directement. */
-    std::atomic<bool>  cancel_requested{false};
-    std::mutex         print_mutex;
-    Slic3r::Print     *current_print = nullptr;
-
-    /* Un seul slicing à la fois (libslic3r n'est pas réentrant). */
-    std::atomic<bool>  slicing{false};
-};
 
 extern "C" {
 
@@ -235,22 +207,22 @@ int qsid_slice_async(qsid_ctx *ctx,
         });
 
         if (const std::string validation = print.validate(); !validation.empty()) {
-            set_err(err_msg, err_len, validation);
+            qsid::set_err(err_msg, err_len, validation);
             return QSID_ERR_SLICE_FAILED;
         }
         if (print.empty()) {
-            set_err(err_msg, err_len, "nothing to print: the model is empty or outside the print volume");
+            qsid::set_err(err_msg, err_len, "nothing to print: the model is empty or outside the print volume");
             return QSID_ERR_SLICE_FAILED;
         }
 
         if (ctx->cancel_requested.load()) {
-            set_err(err_msg, err_len, "canceled");
+            qsid::set_err(err_msg, err_len, "canceled");
             return QSID_ERR_CANCELED;
         }
 
         print.process();
         if (ctx->cancel_requested.load()) {
-            set_err(err_msg, err_len, "canceled");
+            qsid::set_err(err_msg, err_len, "canceled");
             return QSID_ERR_CANCELED;
         }
 
@@ -264,15 +236,15 @@ int qsid_slice_async(qsid_ctx *ctx,
         if (FILE *f = std::fopen(out_gcode, "rb")) {
             std::fclose(f);
         } else {
-            set_err(err_msg, err_len, "the core reported success but no G-code was written");
+            qsid::set_err(err_msg, err_len, "the core reported success but no G-code was written");
             return QSID_ERR_IO;
         }
         return QSID_OK;
     } catch (const Slic3r::CanceledException &) {
-        set_err(err_msg, err_len, "canceled");
+        qsid::set_err(err_msg, err_len, "canceled");
         return QSID_ERR_CANCELED;
     } catch (const std::exception &e) {
-        set_err(err_msg, err_len, e.what());
+        qsid::set_err(err_msg, err_len, e.what());
         return QSID_ERR_SLICE_FAILED;
     }
 }
@@ -295,14 +267,14 @@ int qsid_export_stl(qsid_ctx *ctx, const char *model_path, const char *out_stl,
 
     const int rc = a.run(ctx->prog_name.c_str());
     if (rc != 0) {
-        set_err(err_msg, err_len, "STL export failed (core exit status " + std::to_string(rc) + ")");
+        qsid::set_err(err_msg, err_len, "STL export failed (core exit status " + std::to_string(rc) + ")");
         return QSID_ERR_SLICE_FAILED;
     }
     if (FILE *f = std::fopen(out_stl, "rb")) {
         std::fclose(f);
         return QSID_OK;
     }
-    set_err(err_msg, err_len, "the core reported success but no STL was written");
+    qsid::set_err(err_msg, err_len, "the core reported success but no STL was written");
     return QSID_ERR_IO;
 }
 
@@ -330,14 +302,14 @@ int qsid_slice(qsid_ctx *ctx, const char *model_path, const char *config_path,
 
     const int rc = a.run(ctx->prog_name.c_str());
     if (rc != 0) {
-        set_err(err_msg, err_len,
+        qsid::set_err(err_msg, err_len,
                 std::string("slicing failed (core exit status ") + std::to_string(rc) + ")");
         return QSID_ERR_SLICE_FAILED;
     }
     if (FILE *f = std::fopen(out_gcode, "rb")) {
         std::fclose(f);
     } else {
-        set_err(err_msg, err_len, "the core reported success but no G-code was written");
+        qsid::set_err(err_msg, err_len, "the core reported success but no G-code was written");
         return QSID_ERR_IO;
     }
     return QSID_OK;
@@ -357,7 +329,7 @@ int qsid_run_cli(qsid_ctx *ctx, int argc, const char *const *argv,
 
     const int rc = a.run(ctx->prog_name.c_str());
     if (rc != 0) {
-        set_err(err_msg, err_len, "the slicing core returned a non-zero status");
+        qsid::set_err(err_msg, err_len, "the slicing core returned a non-zero status");
         return QSID_ERR_SLICE_FAILED;
     }
     return QSID_OK;

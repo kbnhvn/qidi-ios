@@ -115,7 +115,7 @@ fi
 
 echo "--- cohérence de l'ABI C (en-tête, implémentation, appels Swift)"
 abi_header="$QSID_ROOT/core/include/qidislice.h"
-abi_impl="$QSID_ROOT/core/src/qidislice.cpp"
+abi_impl="$(mktemp)"; cat "$QSID_ROOT"/core/src/*.cpp > "$abi_impl"
 missing_impl=""
 for fn in $(grep -oE 'qsid_[a-z_]+\(' "$abi_header" | tr -d '(' | sort -u); do
     grep -qE "\\b${fn}\\(" "$abi_impl" || missing_impl="$missing_impl $fn"
@@ -123,7 +123,7 @@ done
 if [ -z "$missing_impl" ]; then
     ok "chaque fonction déclarée a une implémentation"
 else
-    bad "déclarées mais absentes de qidislice.cpp :$missing_impl"
+    bad "déclarées mais absentes de core/src :$missing_impl"
 fi
 
 missing_in_header=""
@@ -154,7 +154,7 @@ else
     skip "L10n" "fichier absent"
 fi
 
-echo "--- miroir des algorithmes Swift (le Swift ne tourne pas ici)"
+echo "--- tests Python (scripts)"
 for t in "$QSID_ROOT"/scripts/tests/*.py; do
     [ -f "$t" ] || continue
     if out="$("$PY" "$t")" 2>&1; then

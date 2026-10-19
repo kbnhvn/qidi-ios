@@ -1,1 +1,0 @@
-../../../QSlicerPad/Core/QIDIProfiles.swift

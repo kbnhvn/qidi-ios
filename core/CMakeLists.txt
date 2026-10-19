@@ -7,7 +7,9 @@
 #   - les cibles amont (libslic3r, libcereal, slic3r-arrange-wrapper,
 #     libseqarrange, stb_image) sont déjà définies.
 
-set(QSID_CORE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/qidislice.cpp)
+set(QSID_CORE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/qidislice.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/scene.cpp)
 
 # Sans OCCT (SLIC3R_ENABLE_FORMAT_STEP=OFF), Format/STEP.cpp référence malgré tout
 # load_step_internal() sur Apple (liaison statique du wrapper) : on fournit un stub
@@ -62,4 +64,7 @@ set_target_properties(qidislice PROPERTIES
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_executable(qidislice_gate ${CMAKE_CURRENT_SOURCE_DIR}/gate/main.cpp)
     target_link_libraries(qidislice_gate PRIVATE qidislice)
+
+    add_executable(qidislice_scene_gate ${CMAKE_CURRENT_SOURCE_DIR}/gate/scene_gate.cpp)
+    target_link_libraries(qidislice_scene_gate PRIVATE qidislice)
 endif()

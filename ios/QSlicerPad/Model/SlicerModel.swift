@@ -1,7 +1,11 @@
 //
 //  SlicerModel.swift
-//  État de l'app : profils, modèle importé, slicing (avec progression et
-//  annulation), aperçu, envoi à l'imprimante.
+//  État de l'app : presets (moteur), réglages, scène posée sur le plateau,
+//  slicing (progression, annulation), aperçu G-code, envoi à l'imprimante.
+//
+//  Le moteur (libslic3r) n'est pas réentrant : tous les appels passent par une
+//  file série (`onEngine`). La vue ne parle jamais au moteur directement ; elle
+//  applique les gestes localement (fluide) et valide auprès du moteur à la fin.
 //
 
 import Foundation
@@ -11,51 +15,89 @@ import UIKit   // UIApplication : écran éveillé + tâche d'arrière-plan
 @MainActor
 final class SlicerModel: ObservableObject {
 
-    // MARK: Profils
-
-    @Published private(set) var catalog = QIDIProfileCatalog(sections: [:], vendorName: nil)
-    @Published var selectedPrinter: String = "" {
-        didSet {
-            guard selectedPrinter != oldValue, !isRestoringSelection else { return }
-            // Changer d'imprimante : le preset d'impression et le filament doivent rester
-            // compatibles (sinon on slice, p. ex., une 0,6 mm avec un filament @Q2 0.4).
-            let prints = catalog.printPresets(for: selectedPrinter)
-            if !prints.contains(selectedPrint) { selectedPrint = prints.first ?? "" }
-            let filaments = catalog.filamentPresets(for: selectedPrinter)
-            if !filaments.contains(selectedFilament) { selectedFilament = filaments.first ?? "" }
-            persistSelection()
-        }
-    }
-    @Published var selectedPrint: String = "" {
-        didSet { if !isRestoringSelection { persistSelection() } }
-    }
-    @Published var selectedFilament: String = "" {
-        didSet { if !isRestoringSelection { persistSelection() } }
-    }
-    private var isRestoringSelection = false
-    /// Profil importé (export du bureau) : prioritaire sur le bundle si présent.
-    @Published private(set) var importedProfile: URL?
-
-    /// Réglages de slicing (supports, adhérence…) appliqués par-dessus le preset.
-    @Published var overrides = SliceOverrides() {
-        didSet { persistOverrides() }
-    }
-
-    // MARK: Modèle et résultat
-
-    @Published private(set) var importedModel: URL?
-    @Published private(set) var mesh: STLMesh?
-    @Published private(set) var preview: GCodePreview?
-    @Published private(set) var output: SliceOutput?
+    // MARK: Types
 
     struct SliceOutput: Identifiable {
         let id = UUID()
         let url: URL
-        let lines: Int
-        let layers: Int
         let sizeBytes: Int64
         let seconds: Double
     }
+
+    enum Workspace: String, CaseIterable, Identifiable {
+        case prepare, preview
+        var id: String { rawValue }
+    }
+
+    /// Transformation d'une instance, pour annuler/rétablir.
+    struct TransformSnapshot: Equatable {
+        var objectID: UInt64
+        var instance: Int
+        var offset: [Double]
+        var rotationDeg: [Double]
+        var scale: [Double]
+    }
+
+    // MARK: Presets (moteur)
+
+    @Published private(set) var printers: [String] = []
+    @Published private(set) var printPresets: [String] = []
+    @Published private(set) var filamentPresets: [String] = []
+    @Published private(set) var selection = SlicerCore.PresetSelection(printer: "", print: "", filament: "")
+    /// Profil importé (export du bureau) : remplace les presets tant qu'il est actif.
+    @Published private(set) var importedProfile: URL?
+    /// Configuration du preset seul (valeurs héritées), sans les réglages de l'utilisateur.
+    @Published private(set) var baseConfig: [String: String] = [:]
+    @Published private(set) var presetsReady = false
+
+    /// Réglages de l'utilisateur appliqués par-dessus le preset.
+    @Published var overrides = SliceOverrides() {
+        didSet {
+            guard overrides != oldValue else { return }
+            persistOverrides()
+            scheduleOverridesSync()
+        }
+    }
+
+    // MARK: Scène
+
+    @Published private(set) var scene: SceneInfo?
+    @Published var selectedObjectID: UInt64?
+    /// Triangles locaux (9 floats chacun) par objet.
+    @Published private(set) var meshes: [UInt64: [Float]] = [:]
+    @Published private(set) var sceneAlerts: SceneAlerts?
+    /// Mode « poser sur une face » : le prochain toucher choisit la face.
+    @Published var layOnFaceMode = false
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+
+    // MARK: Caméra du plateau
+
+    struct CameraRequest: Equatable {
+        enum Kind { case frame, top, front, iso }
+        var kind: Kind
+        var token: Int
+    }
+
+    /// Demande de vue prédéfinie, consommée par la vue du plateau (le jeton la rend rejouable).
+    @Published private(set) var cameraRequest: CameraRequest?
+
+    func requestCamera(_ kind: CameraRequest.Kind) {
+        cameraRequest = CameraRequest(kind: kind, token: (cameraRequest?.token ?? 0) + 1)
+    }
+
+    // MARK: Résultat
+
+    @Published var workspace: Workspace = .prepare
+    @Published private(set) var output: SliceOutput?
+    @Published private(set) var summary: SliceSummary?
+    @Published private(set) var gcodeMesh: GCodeMesh?
+    /// Vrai quand la scène ou les réglages ont changé depuis le dernier slicing.
+    @Published private(set) var resultIsStale = false
+
+    @Published var colorMode: GCodeColorMode = .featureType { didSet { if colorMode != oldValue { rebuildPreview() } } }
+    @Published var hiddenRoles: Set<UInt8> = [] { didSet { if hiddenRoles != oldValue { rebuildPreview() } } }
+    @Published var showTravel = false { didSet { if showTravel != oldValue { rebuildPreview() } } }
 
     /// Incrémenté quand la langue change : l'interface est reconstruite.
     @Published var languageVersion = 0
@@ -66,10 +108,9 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var progress: Double = 0
     @Published private(set) var progressText: String = ""
     @Published private(set) var statusLine: String?
-    @Published private(set) var errorMessage: String?
+    @Published var errorMessage: String?
 
-    /// Incrémentés une fois par événement : déclenchent les retours haptiques
-    /// (.sensoryFeedback) dans les vues.
+    /// Incrémentés une fois par événement : déclenchent les retours haptiques.
     @Published private(set) var successTick = 0
     @Published private(set) var errorTick = 0
 
@@ -80,6 +121,10 @@ final class SlicerModel: ObservableObject {
     }
     @Published private(set) var isUploading = false
     @Published private(set) var uploadStatus: String?
+
+    // MARK: Réglages complets (chargés à la demande)
+
+    @Published private(set) var settingsCatalog: SettingsCatalog?
 
     // MARK: Chemins
 
@@ -110,116 +155,142 @@ final class SlicerModel: ObservableObject {
     }()
 
     private var core: SlicerCore?
+    private let engineQueue = DispatchQueue(label: "qsid.engine", qos: .userInitiated)
+    private var gcodeMoves: [GCodeMove] = []
+    private var undoStack: [TransformSnapshot] = []
+    private var redoStack: [TransformSnapshot] = []
+    private var overridesSyncTask: Task<Void, Never>?
+    private var rebuildTask: Task<Void, Never>?
+    private var isRestoring = false
 
     private enum DefaultsKey {
         static let printer = "qsid.printer"
         static let print = "qsid.print"
         static let filament = "qsid.filament"
         static let moonraker = "qsid.moonraker"
-        static let overrides = "qsid.overrides"
+        static let overrides = "qsid.overrides.v2"
     }
 
     // MARK: Cycle de vie
 
     init() {
-        catalog = QIDIProfileCatalog.load()
-        restoreSelection()
         restoreMoonraker()
         restoreOverrides()
-
         do {
             core = try SlicerCore(resourcesDirectory: resourcesDirectory, dataDirectory: dataDirectory)
         } catch {
             errorMessage = error.localizedDescription
         }
+        Task { await bootstrap() }
     }
 
     var engineVersion: String { SlicerCore.version }
 
-    var hasEmbeddedProfiles: Bool { !catalog.printers.isEmpty }
+    private var vendorINI: URL? {
+        Bundle.main.url(forResource: "QIDITechnology", withExtension: "ini", subdirectory: "qidi/profiles")
+    }
 
-    /// Configuration réellement utilisée : le profil importé, sinon les presets.
+    private func bootstrap() async {
+        guard core != nil else { return }
+        guard let vendorINI else {
+            errorMessage = "Profils QIDI absents du bundle."
+            return
+        }
+        do {
+            try await onEngine { try $0.loadPresets(vendorINI: vendorINI) }
+        } catch {
+            errorMessage = error.localizedDescription
+            return
+        }
+        let d = UserDefaults.standard
+        var printer = d.string(forKey: DefaultsKey.printer)
+        if printer == nil {
+            // Première utilisation : une buse 0,4 mm (la plus courante) plutôt que la
+            // première de la liste triée (« … 0.2 nozzle »).
+            let all = try? await onEngine { core -> [String] in
+                try core.selectPresets(printer: nil, print: nil, filament: nil)
+                return try core.presets(kind: "printer")
+            }
+            printer = all?.first(where: { $0.contains("0.4") }) ?? all?.first
+        }
+        isRestoring = true
+        await applySelection(printer: printer,
+                             print: d.string(forKey: DefaultsKey.print),
+                             filament: d.string(forKey: DefaultsKey.filament))
+        isRestoring = false
+        presetsReady = true
+        await refreshScene()
+    }
+
+    // MARK: Moteur (file série)
+
+    private func onEngine<T>(_ work: @escaping (SlicerCore) throws -> T) async throws -> T {
+        guard let core else { throw SlicerCoreError.unavailable }
+        return try await withCheckedThrowingContinuation { continuation in
+            engineQueue.async {
+                do { continuation.resume(returning: try work(core)) }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    // MARK: Presets
+
+    func selectPrinter(_ name: String) {
+        Task { await applySelection(printer: name, print: nil, filament: nil) }
+    }
+
+    func selectPrint(_ name: String) {
+        Task { await applySelection(printer: nil, print: name, filament: nil) }
+    }
+
+    func selectFilament(_ name: String) {
+        Task { await applySelection(printer: nil, print: nil, filament: name) }
+    }
+
+    private func applySelection(printer: String?, print: String?, filament: String?) async {
+        do {
+            // Un profil importé est abandonné dès qu'on choisit un preset.
+            if !isRestoring { importedProfile = nil }
+            let chosen = try await onEngine { try $0.selectPresets(printer: printer, print: print, filament: filament) }
+            selection = chosen
+            persistSelection()
+            await refreshPresetLists()
+            await syncOverrides()
+            await refreshScene()
+            markStale()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshPresetLists() async {
+        do {
+            let result = try await onEngine { core in
+                (try core.presets(kind: "printer"), try core.presets(kind: "print"),
+                 try core.presets(kind: "filament"), try core.baseConfig())
+            }
+            printers = result.0
+            printPresets = result.1
+            filamentPresets = result.2
+            baseConfig = result.3
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Libellé du profil actif pour l'interface.
     var activeProfileLabel: String {
         if let importedProfile { return importedProfile.lastPathComponent }
-        if hasEmbeddedProfiles && !selectedPrinter.isEmpty {
-            let filament = selectedFilament.isEmpty ? "" : " / \(selectedFilament)"
-            let suffix = overrides.isEmpty ? "" : " · options perso"
-            return "\(selectedPrinter) · \(selectedPrint)\(filament)\(suffix)"
-        }
-        return "Configuration générique embarquée (dépannage)"
+        let filament = selection.filament.isEmpty ? "" : " / \(selection.filament.components(separatedBy: " @").first ?? selection.filament)"
+        return "\(selection.printer) · \(selection.print.components(separatedBy: " @").first ?? selection.print)\(filament)"
     }
 
-    /// Configuration du preset *sans* les réglages de l'utilisateur : référence pour
-    /// afficher les valeurs héritées et détecter ce qui a été modifié.
-    var presetConfig: [String: String] {
-        if let importedProfile, let text = try? String(contentsOf: importedProfile, encoding: .utf8) {
-            return QIDIProfileCatalog.iniDictionary(text)
-        }
-        guard hasEmbeddedProfiles, !selectedPrinter.isEmpty, !selectedPrint.isEmpty else { return [:] }
-        return catalog.resolvedConfig(printer: selectedPrinter, print: selectedPrint,
-                                      filament: selectedFilament.isEmpty ? nil : selectedFilament)
-    }
-
-    private var bundledGenericConfig: URL? {
-        Bundle.main.url(forResource: "qidi_generic_fff", withExtension: "ini", subdirectory: "qidi/generic")
-    }
-
-    // MARK: Sélection persistée
-
-    private func restoreSelection() {
+    private func persistSelection() {
         let d = UserDefaults.standard
-        let printers = catalog.printers
-        // Lire les valeurs mémorisées *avant* d'affecter quoi que ce soit : les
-        // observateurs réécrivent la sélection.
-        let storedPrinter = d.string(forKey: DefaultsKey.printer)
-        let storedPrint = d.string(forKey: DefaultsKey.print)
-        let storedFilament = d.string(forKey: DefaultsKey.filament)
-
-        isRestoringSelection = true
-        defer { isRestoringSelection = false }
-
-        let printer = (storedPrinter.flatMap { printers.contains($0) ? $0 : nil })
-            ?? Self.defaultPrinter(in: printers)
-        selectedPrinter = printer
-        let prints = catalog.printPresets(for: printer)
-        selectedPrint = (storedPrint.flatMap { prints.contains($0) ? $0 : nil }) ?? prints.first ?? ""
-        let filaments = catalog.filamentPresets(for: printer)
-        selectedFilament = (storedFilament.flatMap { filaments.contains($0) ? $0 : nil }) ?? filaments.first ?? ""
-    }
-
-    /// Première imprimante par défaut : une buse 0,4 mm (la plus courante) plutôt que
-    /// la première de la liste triée (« … 0.2 nozzle »).
-    private static func defaultPrinter(in printers: [String]) -> String {
-        printers.first(where: { $0.contains("0.4") }) ?? printers.first ?? ""
-    }
-
-    func persistSelection() {
-        let d = UserDefaults.standard
-        d.set(selectedPrinter, forKey: DefaultsKey.printer)
-        d.set(selectedPrint, forKey: DefaultsKey.print)
-        d.set(selectedFilament, forKey: DefaultsKey.filament)
-    }
-
-    private func restoreOverrides() {
-        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.overrides),
-              let saved = try? JSONDecoder().decode(SliceOverrides.self, from: data) else { return }
-        overrides = saved
-    }
-
-    private func persistOverrides() {
-        guard let data = try? JSONEncoder().encode(overrides) else { return }
-        UserDefaults.standard.set(data, forKey: DefaultsKey.overrides)
-    }
-
-    private func restoreMoonraker() {
-        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.moonraker),
-              let config = try? JSONDecoder().decode(MoonrakerConfig.self, from: data) else { return }
-        moonraker = config
-    }
-
-    private func persistMoonraker() {
-        guard let data = try? JSONEncoder().encode(moonraker) else { return }
-        UserDefaults.standard.set(data, forKey: DefaultsKey.moonraker)
+        d.set(selection.printer, forKey: DefaultsKey.printer)
+        d.set(selection.print, forKey: DefaultsKey.print)
+        d.set(selection.filament, forKey: DefaultsKey.filament)
     }
 
     // MARK: Import
@@ -236,121 +307,285 @@ final class SlicerModel: ObservableObject {
         return destination
     }
 
+    /// Ajoute un modèle à la scène (les objets déjà posés restent en place).
     func importModel(from url: URL) {
         errorMessage = nil
-        output = nil
-        preview = nil
-        do {
-            let copy = try importFile(from: url, into: dataDirectory.appendingPathComponent("models"))
-            importedModel = copy
-            loadMesh(for: copy)
-        } catch {
-            errorMessage = "Import du modèle impossible : \(error.localizedDescription)"
+        Task {
+            do {
+                let copy = try importFile(from: url, into: dataDirectory.appendingPathComponent("models"))
+                let result = try await onEngine { try $0.addToScene(copy) }
+                sceneAlerts = result.alerts.isEmpty ? nil : result.alerts
+                await refreshScene()
+                selectedObjectID = result.added.first
+                workspace = .prepare
+                markStale()
+            } catch {
+                errorMessage = "Import du modèle impossible : \(error.localizedDescription)"
+                errorTick += 1
+            }
         }
     }
 
     /// Import par glisser-déposer (Fichiers, Shapr3D, AirDrop…).
-    /// Retourne true si le fichier a été accepté (sinon iOS refuse le drop).
     func acceptDroppedFiles(_ urls: [URL]) -> Bool {
-        guard let url = urls.first else { return false }
-        switch url.pathExtension.lowercased() {
-        case "stl", "3mf", "obj", "amf":
-            importModel(from: url)
-            return true
-        case "ini":
-            importProfile(from: url)
-            return true
-        default:
-            return false
+        var accepted = false
+        for url in urls {
+            switch url.pathExtension.lowercased() {
+            case "stl", "3mf", "obj", "amf":
+                importModel(from: url); accepted = true
+            case "ini":
+                importProfile(from: url); accepted = true
+            default:
+                break
+            }
         }
+        return accepted
     }
 
     func importProfile(from url: URL) {
         errorMessage = nil
-        do {
-            importedProfile = try importFile(from: url, into: dataDirectory.appendingPathComponent("profiles"))
-        } catch {
-            errorMessage = "Import du profil impossible : \(error.localizedDescription)"
+        Task {
+            do {
+                let copy = try importFile(from: url, into: dataDirectory.appendingPathComponent("profiles"))
+                try await onEngine { try $0.loadConfigINI(copy) }
+                importedProfile = copy
+                await refreshPresetLists()
+                await syncOverrides()
+                await refreshScene()
+                markStale()
+            } catch {
+                errorMessage = "Import du profil impossible : \(error.localizedDescription)"
+            }
         }
     }
 
-    func clearProfile() { importedProfile = nil }
+    func clearProfile() {
+        Task { await applySelection(printer: selection.printer, print: selection.print, filament: selection.filament) }
+    }
 
-    // MARK: Aperçu du modèle
+    // MARK: Réglages
 
-    /// Charge un maillage pour le visualiseur. Un STL est lu directement ; pour
-    /// les autres formats, le moteur l'exporte en STL (in-process).
-    private func loadMesh(for model: URL) {
-        mesh = nil
-        let ext = model.pathExtension.lowercased()
-        if ext == "stl" {
-            if let loaded = try? STLLoader.load(url: model) { mesh = loaded; return }
+    private func restoreOverrides() {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.overrides),
+              let saved = try? JSONDecoder().decode(SliceOverrides.self, from: data) else { return }
+        overrides = saved
+    }
+
+    private func persistOverrides() {
+        guard let data = try? JSONEncoder().encode(overrides) else { return }
+        UserDefaults.standard.set(data, forKey: DefaultsKey.overrides)
+    }
+
+    private func scheduleOverridesSync() {
+        overridesSyncTask?.cancel()
+        overridesSyncTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)   // regroupe les changements rapides (curseurs)
+            guard !Task.isCancelled else { return }
+            await self?.syncOverrides()
+            self?.markStale()
         }
-        guard let core else { return }
-        let stlURL = workDirectory.appendingPathComponent(model.deletingPathExtension().lastPathComponent + ".stl")
+    }
+
+    /// Pousse les réglages de l'utilisateur dans le moteur (qui les valide).
+    private func syncOverrides() async {
+        guard core != nil, presetsReady || isRestoring || !baseConfig.isEmpty else { return }
+        let entries = overrides.configEntries(basedOn: baseConfig)
+        do {
+            let rejected = try await onEngine { core -> [String] in
+                core.resetConfig()
+                var bad: [String] = []
+                for (key, value) in entries {
+                    do { try core.setConfig(key, value) } catch { bad.append(key) }
+                }
+                return bad
+            }
+            if !rejected.isEmpty {
+                for key in rejected { overrides.reset(key) }
+                errorMessage = "Réglage(s) refusé(s) par le moteur : \(rejected.sorted().joined(separator: ", "))"
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Valeur effective (réglage forcé, sinon preset) d'une option.
+    func value(of key: String) -> String? { overrides.value(key, base: baseConfig) }
+
+    func setOption(_ key: String, _ value: String) { overrides.set(key, value, base: baseConfig) }
+    func resetOption(_ key: String) { overrides.reset(key) }
+
+    /// Charge (une fois) le schéma des options, la disposition des onglets et les traductions.
+    func loadSettingsCatalog() async {
+        guard settingsCatalog == nil, core != nil else { return }
+        do {
+            let schema = try await onEngine { try $0.configSchemaJSON() }
+            guard let pagesURL = Bundle.main.url(forResource: "config_pages", withExtension: "json"),
+                  let pages = try? Data(contentsOf: pagesURL) else {
+                errorMessage = "Ressource des réglages absente."
+                return
+            }
+            let french = Bundle.main.url(forResource: "config_fr", withExtension: "json").flatMap { try? Data(contentsOf: $0) }
+            settingsCatalog = try SettingsCatalog(schemaJSON: schema, layoutJSON: pages, frenchJSON: french,
+                                                  useFrench: !L10n.isEnglish)
+        } catch {
+            errorMessage = "Réglages complets indisponibles : \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: Scène
+
+    private func refreshScene() async {
+        do {
+            let info = try await onEngine { try $0.sceneInfo() }
+            let missing = info.objects.map(\.id).filter { meshes[$0] == nil }
+            if !missing.isEmpty {
+                let loaded = try await onEngine { core -> [(UInt64, [Float])] in
+                    missing.map { ($0, (try? core.sceneMesh(objectID: $0)) ?? []) }
+                }
+                for (id, triangles) in loaded { meshes[id] = triangles }
+            }
+            let live = Set(info.objects.map(\.id))
+            for id in meshes.keys where !live.contains(id) { meshes[id] = nil }
+            scene = info
+            if let selected = selectedObjectID, !live.contains(selected) { selectedObjectID = nil }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissAlerts() { sceneAlerts = nil }
+
+    var selectedObject: SceneObject? {
+        guard let id = selectedObjectID else { return nil }
+        return scene?.objects.first { $0.id == id }
+    }
+
+    private func snapshot(of object: SceneObject, instance: Int = 0) -> TransformSnapshot? {
+        guard instance < object.instances.count else { return nil }
+        let i = object.instances[instance]
+        return TransformSnapshot(objectID: object.id, instance: instance,
+                                 offset: i.offset, rotationDeg: i.rotationDeg, scale: i.scale)
+    }
+
+    /// Applique une transformation (geste terminé ou saisie dans l'inspecteur).
+    func transform(objectID: UInt64, instance: Int = 0,
+                   offset: [Double]? = nil, rotationDeg: [Double]? = nil, scale: [Double]? = nil,
+                   dropToBed: Bool = false, recordUndo: Bool = true) {
+        guard let object = scene?.objects.first(where: { $0.id == objectID }) else { return }
+        let before = snapshot(of: object, instance: instance)
         Task {
             do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        do { try core.exportSTL(model: model, output: stlURL); continuation.resume() }
-                        catch { continuation.resume(throwing: error) }
-                    }
+                try await onEngine {
+                    try $0.setTransform(objectID: objectID, instance: instance, offset: offset,
+                                        rotationDeg: rotationDeg, scale: scale, dropToBed: dropToBed)
                 }
-                if let loaded = try? STLLoader.load(url: stlURL) {
-                    self.mesh = loaded
+                if recordUndo, let before {
+                    undoStack.append(before)
+                    if undoStack.count > 100 { undoStack.removeFirst() }
+                    redoStack.removeAll()
+                    updateUndoFlags()
                 }
+                await refreshScene()
+                markStale()
             } catch {
-                // L'aperçu est un confort : ne pas masquer l'erreur de slicing.
-                print("aperçu indisponible : \(error.localizedDescription)")
+                errorMessage = error.localizedDescription
+                await refreshScene()   // la vue revient à l'état réel du moteur
             }
         }
+    }
+
+    func undo() { stepHistory(from: &undoStack, to: &redoStack) }
+    func redo() { stepHistory(from: &redoStack, to: &undoStack) }
+
+    private func stepHistory(from source: inout [TransformSnapshot], to target: inout [TransformSnapshot]) {
+        guard let snap = source.popLast(),
+              let object = scene?.objects.first(where: { $0.id == snap.objectID }),
+              let current = snapshot(of: object, instance: snap.instance) else { updateUndoFlags(); return }
+        target.append(current)
+        updateUndoFlags()
+        transform(objectID: snap.objectID, instance: snap.instance, offset: snap.offset,
+                  rotationDeg: snap.rotationDeg, scale: snap.scale, recordUndo: false)
+    }
+
+    private func updateUndoFlags() {
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    func deleteSelected() {
+        guard let id = selectedObjectID else { return }
+        mutateScene { try $0.removeObject(id) }
+        selectedObjectID = nil
+    }
+
+    func setInstanceCount(_ count: Int, objectID: UInt64) {
+        mutateScene { try $0.setInstanceCount(objectID: objectID, count: count) }
+    }
+
+    func arrange() { mutateScene { try $0.arrangeScene() } }
+
+    func dropToBed(_ id: UInt64) { mutateScene { try $0.dropToBed(objectID: id) } }
+
+    /// Remet l'orientation d'origine (rotation nulle), l'objet restant posé sur le plateau.
+    func resetRotation(_ id: UInt64) { transform(objectID: id, rotationDeg: [0, 0, 0], dropToBed: true) }
+
+    /// Conversion d'unités (pouces → mm : 25,4 ; mètres → mm : 1000).
+    func scaleSelected(by factor: Double) {
+        guard let object = selectedObject, let inst = object.instances.first else { return }
+        transform(objectID: object.id, scale: inst.scale.map { $0 * factor }, dropToBed: true)
+    }
+
+    func layOnFace(objectID: UInt64, triangle: Int) {
+        layOnFaceMode = false
+        mutateScene { try $0.layOnFace(objectID: objectID, triangle: triangle) }
+    }
+
+    func clearScene() {
+        mutateScene { try $0.clearScene() }
+        selectedObjectID = nil
+        meshes.removeAll()
+        output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []
+    }
+
+    private func mutateScene(_ work: @escaping (SlicerCore) throws -> Void) {
+        Task {
+            do {
+                try await onEngine(work)
+                await refreshScene()
+                markStale()
+            } catch {
+                errorMessage = error.localizedDescription
+                errorTick += 1
+            }
+        }
+    }
+
+    private func markStale() {
+        if output != nil { resultIsStale = true }
     }
 
     // MARK: Slicing
 
+    var canSlice: Bool { !(scene?.objects.isEmpty ?? true) && !isSlicing && presetsReady }
+
+    private var outputName: String {
+        let base = scene?.objects.first.map { ($0.name as NSString).deletingPathExtension } ?? "plateau"
+        let safe = base.map { $0.isLetter || $0.isNumber || "-_ ".contains($0) ? $0 : "_" }
+        return String(safe).trimmingCharacters(in: .whitespaces).isEmpty ? "plateau" : String(safe)
+    }
+
     func slice() {
-        guard let model = importedModel else {
-            errorMessage = "Importez d'abord un modèle (STL, 3MF, OBJ)."
+        guard canSlice else {
+            if scene?.objects.isEmpty ?? true { errorMessage = "Importez d'abord un modèle (STL, 3MF, OBJ)." }
             return
         }
-        guard let core else {
-            errorMessage = "Le moteur de slicing n'est pas disponible."
-            return
-        }
-        guard !isSlicing else { return }
-
-        var config = bundledGenericConfig
-        do {
-            if let importedProfile {
-                // Un profil importé reste prioritaire, mais les réglages de l'utilisateur
-                // s'appliquent aussi par-dessus.
-                if overrides.isEmpty {
-                    config = importedProfile
-                } else {
-                    var merged = presetConfig
-                    for (key, value) in overrides.configEntries(basedOn: merged) { merged[key] = value }
-                    let url = workDirectory.appendingPathComponent("preset.ini")
-                    try QIDIProfileCatalog.iniText(merged).write(to: url, atomically: true, encoding: .utf8)
-                    config = url
-                }
-            } else if hasEmbeddedProfiles, !selectedPrinter.isEmpty, !selectedPrint.isEmpty {
-                let url = workDirectory.appendingPathComponent("preset.ini")
-                try catalog.writeConfig(printer: selectedPrinter,
-                                        print: selectedPrint,
-                                        filament: selectedFilament.isEmpty ? nil : selectedFilament,
-                                        overrides: overrides,
-                                        to: url)
-                config = url
-            }
-        } catch {
-            errorMessage = error.localizedDescription
+        if scene?.hasObjectOutsideBed == true {
+            errorMessage = "Un objet sort du plateau : déplacez-le ou touchez « Organiser »."
+            errorTick += 1
             return
         }
 
-        let outputURL = exportsDirectory
-            .appendingPathComponent(model.deletingPathExtension().lastPathComponent)
-            .appendingPathExtension("gcode")
-
+        let outputURL = exportsDirectory.appendingPathComponent(outputName).appendingPathExtension("gcode")
         isSlicing = true
         progress = 0
         progressText = "Préparation…"
@@ -358,104 +593,86 @@ final class SlicerModel: ObservableObject {
         errorMessage = nil
         let started = Date()
         // Les callbacks arrivent du thread de slicing, plusieurs fois par seconde : on
-        // ne garde que la dernière valeur et on l'applique à cadence fixe (sinon des
-        // tâches non ordonnées pouvaient faire reculer la barre ou s'afficher après « Terminé »).
-        let progressRelay = ProgressRelay { [weak self] percent, text in
+        // ne garde que la dernière valeur et on l'applique à cadence fixe.
+        let relay = ProgressRelay { [weak self] percent, text in
             guard let self, self.isSlicing else { return }
             if percent >= 0 { self.progress = Double(percent) / 100.0 }
             if !text.isEmpty { self.progressText = text }
         }
 
         Task {
-            defer { progressRelay.stop() }
-            // Un slicing dure de quelques secondes à quelques minutes : on empêche la
-            // mise en veille et on demande du temps d'exécution en arrière-plan
-            // (iOS suspend sinon l'app dès qu'elle passe en fond).
+            defer { relay.stop() }
+            // Un slicing dure de quelques secondes à quelques minutes : écran éveillé et
+            // temps d'exécution en arrière-plan (iOS suspend sinon l'app en fond).
             let keepAwake = KeepAwake()
             defer { keepAwake.end() }
             do {
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        do {
-                            try core.slice(model: model, config: config, output: outputURL) { percent, text in
-                                progressRelay.push(percent: Int(percent), text: text)
-                            }
-                            continuation.resume()
-                        } catch {
-                            continuation.resume(throwing: error)
-                        }
+                let result = try await onEngine { core -> (SliceSummary, [GCodeMove]) in
+                    let summary = try core.sliceScene(output: outputURL) { percent, text in
+                        relay.push(percent: Int(percent), text: text)
                     }
+                    return (summary, try core.gcodeMoves().map(GCodeMove.init))
                 }
-
-                progressRelay.stop()   // plus aucune mise à jour tardive après la fin
-                let elapsed = Date().timeIntervalSince(started)
-                let stats = Self.streamStats(gcode: outputURL)
-                self.output = SliceOutput(url: outputURL,
-                                          lines: stats.lines,
-                                          layers: stats.layers,
-                                          sizeBytes: stats.bytes,
-                                          seconds: elapsed)
-                self.statusLine = "Terminé en \(String(format: "%.1f", elapsed)) s"
-                self.progress = 1
-                self.progressText = "Terminé"
-                self.preview = try? GCodePreview.parse(url: outputURL)
-                self.successTick += 1
+                relay.stop()
+                let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path)
+                summary = result.0
+                gcodeMoves = result.1
+                output = SliceOutput(url: outputURL, sizeBytes: (attrs?[.size] as? Int64) ?? 0,
+                                     seconds: Date().timeIntervalSince(started))
+                resultIsStale = false
+                progress = 1
+                progressText = "Terminé"
+                statusLine = "Terminé en \(String(format: "%.1f", Date().timeIntervalSince(started))) s"
+                if let warning = result.0.warnings.first { errorMessage = warning }
+                rebuildPreview()
+                workspace = .preview
+                successTick += 1
             } catch SlicerCoreError.canceled {
-                self.errorTick += 1
-                self.statusLine = L10n.t("Slicing annulé.")
-                self.progress = 0
-                self.progressText = ""
+                errorTick += 1
+                statusLine = L10n.t("Slicing annulé.")
+                progress = 0
+                progressText = ""
             } catch {
-                self.errorMessage = error.localizedDescription
-                self.statusLine = nil
-                self.errorTick += 1
+                errorMessage = error.localizedDescription
+                statusLine = nil
+                errorTick += 1
             }
-            self.isSlicing = false
+            isSlicing = false
         }
     }
 
-    func cancel() {
-        core?.cancel()
-    }
+    func cancel() { core?.cancel() }
 
-    /// Statistiques du G-code en *streaming* (un fichier peut faire des centaines de Mo).
-    private static func streamStats(gcode url: URL) -> (lines: Int, layers: Int, bytes: Int64) {
-        guard let stream = InputStream(url: url) else { return (0, 0, 0) }
-        stream.open()
-        defer { stream.close() }
+    // MARK: Aperçu
 
-        var lines = 0, layers = 0, bytes: Int64 = 0
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-        var atLineStart = true
-        var matched = 0
-        let needle = Array(";LAYER_CHANGE".utf8)
-
-        while stream.hasBytesAvailable {
-            let read = stream.read(&buffer, maxLength: buffer.count)
-            if read <= 0 { break }
-            bytes += Int64(read)
-            for i in 0..<read {
-                let byte = buffer[i]
-                if atLineStart {
-                    if matched < needle.count && byte == needle[matched] {
-                        matched += 1
-                    } else {
-                        matched = (byte == needle[0]) ? 1 : 0
-                    }
-                    atLineStart = false
-                }
-                if byte == 0x0A {
-                    lines += 1
-                    atLineStart = true
-                    if matched == needle.count { layers += 1 }
-                    matched = 0
-                }
-            }
+    /// Reconstruit la géométrie de l'aperçu (hors du thread principal).
+    private func rebuildPreview() {
+        guard !gcodeMoves.isEmpty else { gcodeMesh = nil; return }
+        rebuildTask?.cancel()
+        var builder = GCodeMeshBuilder()
+        builder.mode = colorMode
+        builder.hiddenRoles = hiddenRoles
+        builder.includeTravel = showTravel
+        let moves = gcodeMoves
+        rebuildTask = Task {
+            let mesh = await Task.detached(priority: .userInitiated) { builder.build(moves: moves) }.value
+            guard !Task.isCancelled else { return }
+            gcodeMesh = mesh
         }
-        return (lines, layers, bytes)
     }
 
     // MARK: Envoi à l'imprimante
+
+    private func restoreMoonraker() {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.moonraker),
+              let config = try? JSONDecoder().decode(MoonrakerConfig.self, from: data) else { return }
+        moonraker = config
+    }
+
+    private func persistMoonraker() {
+        guard let data = try? JSONEncoder().encode(moonraker) else { return }
+        UserDefaults.standard.set(data, forKey: DefaultsKey.moonraker)
+    }
 
     func uploadAndPrint() {
         guard let output else { return }

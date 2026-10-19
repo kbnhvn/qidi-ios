@@ -15,7 +15,6 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 printerSection
-                profileSection
                 languageSection
                 aboutSection
             }
@@ -54,28 +53,6 @@ struct SettingsView: View {
             Text(L10n.t("Imprimante (Moonraker)"))
         } footer: {
             Text(L10n.t("L'app contacte directement l'imprimante sur le réseau local (Moonraker). Rien ne transite par un serveur."))
-        }
-    }
-
-    private var profileSection: some View {
-        Section(L10n.t("Profil d'impression")) {
-            if model.hasEmbeddedProfiles {
-                Picker(L10n.t("Imprimante"), selection: $model.selectedPrinter) {
-                    ForEach(model.catalog.printers, id: \.self) { Text($0).tag($0) }
-                }
-                Picker(L10n.t("Réglages d'impression"), selection: $model.selectedPrint) {
-                    ForEach(model.catalog.printPresets(for: model.selectedPrinter), id: \.self) { Text($0).tag($0) }
-                }
-                let filaments = model.catalog.filamentPresets(for: model.selectedPrinter)
-                if !filaments.isEmpty {
-                    Picker(L10n.t("Filament"), selection: $model.selectedFilament) {
-                        Text(L10n.t("—")).tag("")
-                        ForEach(filaments, id: \.self) { Text($0).tag($0) }
-                    }
-                }
-            } else {
-                Text(model.activeProfileLabel).font(.footnote)
-            }
         }
     }
 

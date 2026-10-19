@@ -12,7 +12,7 @@ struct SliceSettingsView: View {
     @EnvironmentObject private var model: SlicerModel
     @Environment(\.dismiss) private var dismiss
 
-    private var base: [String: String] { model.presetConfig }
+    private var base: [String: String] { model.baseConfig }
 
     var body: some View {
         NavigationStack {
