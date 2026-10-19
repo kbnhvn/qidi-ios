@@ -238,24 +238,33 @@ struct LayerRangeSlider: View {
     @Binding var upper: Int
     let heights: [Float]
 
+    /// Géométrie de la piste : marges de 40 pt en haut et en bas.
+    private struct Track {
+        let top: CGFloat
+        let bottom: CGFloat
+        let count: Int
+        var span: CGFloat { max(bottom - top, 1) }
+
+        func y(_ layer: Int) -> CGFloat { bottom - span * CGFloat(layer) / CGFloat(max(count - 1, 1)) }
+
+        func layer(at y: CGFloat) -> Int {
+            let t = (bottom - min(max(y, top), bottom)) / span
+            return Int((t * CGFloat(count - 1)).rounded())
+        }
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let trackTop: CGFloat = 40, trackBottom: CGFloat = geo.size.height - 40
-            let span = max(trackBottom - trackTop, 1)
-            func y(_ layer: Int) -> CGFloat { trackBottom - span * CGFloat(layer) / CGFloat(max(count - 1, 1)) }
-            func layer(at y: CGFloat) -> Int {
-                let t = (trackBottom - min(max(y, trackTop), trackBottom)) / span
-                return Int((t * CGFloat(count - 1)).rounded())
-            }
-
+            let track = Track(top: 40, bottom: geo.size.height - 40, count: count)
             ZStack(alignment: .top) {
                 Capsule().fill(.regularMaterial).frame(width: 84)
-                Capsule().fill(Color.secondary.opacity(0.35)).frame(width: 6, height: span).position(x: 42, y: trackTop + span / 2)
-                Capsule().fill(Color.accentColor).frame(width: 6, height: max(y(lower) - y(upper), 2))
-                    .position(x: 42, y: (y(lower) + y(upper)) / 2)
+                Capsule().fill(Color.secondary.opacity(0.35)).frame(width: 6, height: track.span)
+                    .position(x: 42, y: track.top + track.span / 2)
+                Capsule().fill(Color.accentColor).frame(width: 6, height: max(track.y(lower) - track.y(upper), 2))
+                    .position(x: 42, y: (track.y(lower) + track.y(upper)) / 2)
 
-                handle(layer: upper, at: y(upper), geo: geo) { upper = max(layer(at: $0), lower) }
-                handle(layer: lower, at: y(lower), geo: geo) { lower = min(layer(at: $0), upper) }
+                handle(layer: upper, at: track.y(upper), geo: geo) { upper = max(track.layer(at: $0), lower) }
+                handle(layer: lower, at: track.y(lower), geo: geo) { lower = min(track.layer(at: $0), upper) }
             }
             .coordinateSpace(name: "layerSlider")
         }
