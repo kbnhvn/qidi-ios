@@ -112,3 +112,19 @@ factices, et cohérence des données de test. Sous Linux, on peut se donner un `
 python3 -m venv .tooling/venv && .tooling/venv/bin/pip install cmake
 QSID_CMAKE=.tooling/venv/bin/cmake scripts/lint.sh
 ```
+
+
+## Banc de test Linux (développement rapide, sans Mac)
+
+La CI macOS est lente et coûteuse ; la plupart des défauts se trouvent plus vite sous Linux. Trois outils,
+du moins cher au plus cher (aucun ne remplace la CI `ios-app` ni la recette iPad) :
+
+| Commande | Ce que ça vérifie | Durée |
+|---|---|---|
+| `scripts/lint.sh` | scripts, YAML, CMake, ABI C ↔ Swift, localisation, **tests Swift** (`ios/QSlicerKit`), **types du modèle et du pont C** (`scripts/typecheck-swift.sh`) | ≈ 1 min |
+| `scripts/linux-engine.sh deps && build` puis `gate` | le moteur (libslic3r + ABI v3) compilé avec les paquets Ubuntu, la gate historique (8 100 lignes, 100 couches) et la **gate de scène** (90 vérifications contre le vrai bundle QIDI) | build ≈ 50 min à froid (4 cœurs), reprises en secondes |
+| `scripts/linux-engine.sh clang` | notre code C++ analysé par clang `-Werror` (le compilateur de macOS/iOS) | secondes |
+| `scripts/e2e-linux.sh` | le **vrai `SlicerModel`** (Swift) contre le vrai moteur et un Moonraker simulé : 68+ vérifications | ≈ 2 min |
+
+Nécessite un toolchain Swift pour Linux (swift.org) pour `lint`, `typecheck` et `e2e`. Les vues SwiftUI /
+SceneKit ne sont qu'analysées syntaxiquement : c'est la CI `ios-app` qui les compile.
