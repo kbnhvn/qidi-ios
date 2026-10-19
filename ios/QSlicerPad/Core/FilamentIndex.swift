@@ -7,6 +7,9 @@
 
 import Foundation
 
+/// « 0.20mm Standard @Q2 0.4 nozzle » → « 0.20mm Standard » (nom d'un preset sans la variante d'imprimante).
+func presetDisplayName(_ name: String) -> String { name.components(separatedBy: " @").first ?? name }
+
 struct FilamentEntry: Identifiable, Hashable {
     /// Nom complet du preset (« QIDI PLA Rapido @Q2 0.4 nozzle »).
     let id: String

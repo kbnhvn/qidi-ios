@@ -7,9 +7,6 @@
 
 import SwiftUI
 
-/// « 0.20mm Standard @Q2 0.4 nozzle » → « 0.20mm Standard ».
-func presetDisplayName(_ name: String) -> String { name.components(separatedBy: " @").first ?? name }
-
 struct InspectorView: View {
     @EnvironmentObject private var model: SlicerModel
     @Binding var isImportingModel: Bool
@@ -102,6 +99,8 @@ struct FrequentSettingsSection: View {
     @EnvironmentObject private var model: SlicerModel
     @Binding var showQuick: Bool
     @Binding var showAll: Bool
+    @State private var askName = false
+    @State private var presetName = ""
 
     private var base: [String: String] { model.baseConfig }
 
@@ -129,6 +128,28 @@ struct FrequentSettingsSection: View {
 
             if let summary = model.overrides.summary(base: base) {
                 Text(summary).font(.footnote).foregroundStyle(.orange)
+            }
+
+            Menu {
+                Button(L10n.t("Enregistrer les réglages actuels…")) { presetName = ""; askName = true }
+                    .disabled(model.overrides.isEmpty)
+                ForEach(model.userPresets.keys.sorted(), id: \.self) { name in
+                    Button(name) { model.applyUserPreset(name) }
+                }
+                if !model.userPresets.isEmpty {
+                    Menu(L10n.t("Supprimer un préréglage")) {
+                        ForEach(model.userPresets.keys.sorted(), id: \.self) { name in
+                            Button(name, role: .destructive) { model.deleteUserPreset(name) }
+                        }
+                    }
+                }
+            } label: {
+                Label(L10n.t("Mes préréglages"), systemImage: "bookmark").frame(minHeight: 44)
+            }
+            .alert(L10n.t("Nom du préréglage"), isPresented: $askName) {
+                TextField(L10n.t("Nom"), text: $presetName)
+                Button(L10n.t("Enregistrer")) { model.saveUserPreset(named: presetName) }
+                Button(L10n.t("Annuler"), role: .cancel) {}
             }
 
             Button { showQuick = true } label: {

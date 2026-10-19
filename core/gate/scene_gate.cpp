@@ -75,6 +75,21 @@ uint64_t first_id(const std::string &added_json)
 
 } // namespace
 
+/* Fournisseur de vignettes factice : damier (remplit RGBA, lignes de haut en bas). */
+static int g_thumb_calls = 0;
+static int checker_provider(int w, int h, uint8_t *rgba, void *user)
+{
+    ++g_thumb_calls;
+    (void) user;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const bool on = ((x / 16) + (y / 16)) % 2 == 0;
+            uint8_t *p = rgba + (static_cast<size_t>(y) * w + x) * 4;
+            p[0] = on ? 250 : 40; p[1] = on ? 175 : 40; p[2] = on ? 60 : 40; p[3] = 255;
+        }
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 5) {
@@ -199,6 +214,36 @@ int main(int argc, char **argv)
     check(qsid_scene_mesh(ctx, id1, &tris, &ntri, err, sizeof(err)) == QSID_OK && ntri == 12, "maillage local : 12 triangles",
           std::to_string(ntri));
     qsid_free(tris);
+
+    std::printf("vignettes (fournisseur de l'hôte)\n");
+    {
+        // X-Plus 4 : « 272x272/PNG, 96x96/PNG » dans le bundle QIDI
+        check(qsid_presets_select(ctx, "X-Plus 4 0.4 nozzle", nullptr, nullptr, &json, err, sizeof(err)) == QSID_OK,
+              "imprimante X-Plus 4", err);
+        qsid_free(json);
+        qsid_set_thumbnail_provider(ctx, checker_provider, nullptr);
+        check(qsid_scene_set_transform(ctx, id1, 0, pos, nullptr, nullptr, 1) == QSID_OK, "objet remis dans le plateau (plateau 280)");
+        char *s2 = nullptr;
+        const int rc_thumb = qsid_slice_scene(ctx, (outdir + "/thumb.gcode").c_str(), nullptr, nullptr, &s2, err, sizeof(err));
+        qsid_free(s2);
+        check(rc_thumb == QSID_OK, "slicing avec fournisseur de vignettes", err);
+        check(g_thumb_calls >= 2, "le moteur a demandé les 2 tailles", std::to_string(g_thumb_calls));
+        std::ifstream in(outdir + "/thumb.gcode");
+        std::string line;
+        int begins = 0;
+        bool size272 = false, size96 = false;
+        while (std::getline(in, line))
+            if (line.find("thumbnail begin") != std::string::npos) {
+                ++begins;
+                size272 = size272 || line.find("272x272") != std::string::npos;
+                size96 = size96 || line.find("96x96") != std::string::npos;
+            }
+        check(begins == 2 && size272 && size96, "deux vignettes (272 et 96) écrites dans le G-code", std::to_string(begins));
+        qsid_set_thumbnail_provider(ctx, nullptr, nullptr);
+        // retour à la Q2 pour la suite
+        qsid_presets_select(ctx, "Q2 0.4 nozzle", nullptr, nullptr, &json, err, sizeof(err));
+        qsid_free(json);
+    }
 
     std::printf("slicing de la scène\n");
     const std::string gcode = outdir + "/scene.gcode";

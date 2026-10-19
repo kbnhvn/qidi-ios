@@ -14,6 +14,8 @@ struct PreviewCanvas: View {
     @State private var upper = Int.max
     @State private var legendOpen = true
     @State private var revision = 0
+    @State private var topProgress = 1.0
+    @State private var playing = false
 
     private var layerCount: Int { model.gcodeMesh?.layers.count ?? 0 }
     private var range: ClosedRange<Int> {
@@ -23,7 +25,8 @@ struct PreviewCanvas: View {
 
     var body: some View {
         ZStack {
-            GCodeSceneView(mesh: model.gcodeMesh, layerRange: range, bed: model.scene?.bed, revision: revision)
+            GCodeSceneView(mesh: model.gcodeMesh, layerRange: range, bed: model.scene?.bed, revision: revision,
+                           topProgress: topProgress)
                 .ignoresSafeArea(edges: .bottom)
 
             if model.gcodeMesh == nil {
@@ -37,6 +40,13 @@ struct PreviewCanvas: View {
                     }
                 }
             }
+
+            VStack {
+                Spacer()
+                if layerCount > 1 { playbackBar }
+            }
+            .padding(10)
+            .padding(.trailing, 94)
 
             HStack(alignment: .top) {
                 VStack(spacing: 8) {
@@ -64,11 +74,48 @@ struct PreviewCanvas: View {
             revision += 1
             upper = Int.max
             lower = 0
+            topProgress = 1
+            playing = false
         }
+        .onChange(of: upper) { _, _ in if !playing { topProgress = 1 } }
+        .task(id: playing) { await play() }
         .onChange(of: model.colorMode) { _, _ in revision += 1 }
         .onChange(of: model.hiddenRoles) { _, _ in revision += 1 }
         .onChange(of: model.showTravel) { _, _ in revision += 1 }
         .onAppear { revision += 1 }
+    }
+}
+
+extension PreviewCanvas {
+    /// Curseur de mouvements de la dernière couche, et lecture couche par couche.
+    fileprivate var playbackBar: some View {
+        HStack(spacing: 12) {
+            Button { playing.toggle() } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill").frame(width: 44, height: 44)
+            }
+            .accessibilityLabel(L10n.t(playing ? "Pause" : "Lecture"))
+            Slider(value: $topProgress, in: 0...1) { Text(L10n.t("Mouvements")) }
+            Text("\(Int(topProgress * 100)) %").font(.caption.monospacedDigit()).frame(width: 44)
+        }
+        .padding(.horizontal, 12)
+        .background(.regularMaterial, in: Capsule())
+        .frame(maxWidth: 520)
+    }
+
+    /// Avance de ~5 % de couche toutes les 33 ms ; passe à la couche suivante en fin de couche.
+    @MainActor
+    fileprivate func play() async {
+        guard playing else { return }
+        if upper >= layerCount - 1 && topProgress >= 1 { upper = lower; topProgress = 0 }
+        while !Task.isCancelled && playing {
+            try? await Task.sleep(nanoseconds: 33_000_000)
+            topProgress += 0.05
+            if topProgress >= 1 {
+                let top = min(upper, layerCount - 1)
+                if top < layerCount - 1 { upper = top + 1; topProgress = 0 }
+                else { topProgress = 1; playing = false }
+            }
+        }
     }
 }
 

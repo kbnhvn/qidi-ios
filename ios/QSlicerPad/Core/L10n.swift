@@ -234,6 +234,46 @@ enum L10n {
         "Jupe / bordure": "Skirt / brim",
         "Interface de supports": "Support interface",
         "Tour d'essuyage": "Wipe tower",
-        "G-code personnalisé": "Custom G-code"
+        "G-code personnalisé": "Custom G-code",
+
+        // Calibration, imprimante
+        "Calibration": "Calibration",
+        "Débit — calibration fine…": "Flow — fine calibration…",
+        "Débit — calibration grossière": "Flow — coarse calibration",
+        "Début": "Start",
+        "Envoi": "Upload",
+        "Fin": "End",
+        "Pas": "Step",
+        "Le tour imprime une marche de 5 mm par valeur de Pressure Advance (M900 K…). Choisissez la hauteur où les angles sont les plus nets : K = début + pas × (hauteur / 5).": "The tower prints one 5 mm step per Pressure Advance value (M900 K…). Pick the height where the corners are sharpest: K = start + step × (height / 5).",
+        "Multiplicateur d'extrusion": "Extrusion multiplier",
+        "Plateau chauffant": "Heated bed",
+        "Pressure Advance (tour)…": "Pressure Advance (tower)…",
+        "Quitter": "Exit",
+        "Saisissez la meilleure valeur de la calibration grossière pour l'affiner.": "Enter the best value from the coarse calibration to refine it.",
+        "réglages temporaires": "temporary settings",
+        "État": "Status",
+        "Pressure Advance (tour)": "Pressure Advance (tower)",
+        "Débit — calibration fine": "Flow — fine calibration",
+        "Les réglages de la calibration sont temporaires : notez la meilleure valeur, puis quittez la calibration pour retrouver vos réglages.": "Calibration settings are temporary: note the best value, then exit calibration to get your settings back.",
+        "Au repos": "Idle",
+        "Impression en cours": "Printing",
+        "En pause": "Paused",
+        "Annulé": "Canceled",
+        "Erreur": "Error",
+
+        // Préréglages, export, lecture
+        "Mouvements": "Moves",
+        "Lecture": "Play",
+        "Pause": "Pause",
+        "Plus": "More",
+        "Préparer l'export .ini…": "Prepare .ini export…",
+        "Partager la configuration effective (.ini)": "Share the effective configuration (.ini)",
+        "Réimportable dans QIDISlicer desktop ou ici via « Importer un profil ».": "Can be re-imported into desktop QIDISlicer or here via “Import a profile”.",
+        "Enregistrer les réglages actuels…": "Save current settings…",
+        "Supprimer un préréglage": "Delete a preset",
+        "Mes préréglages": "My presets",
+        "Nom du préréglage": "Preset name",
+        "Nom": "Name",
+        "Enregistrer": "Save"
     ]
 }

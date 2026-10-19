@@ -178,6 +178,19 @@ else
     skip "swift test" "toolchain Swift absente (QSID_SWIFT=…/swift)"
 fi
 
+echo "--- types Swift (modèle + pont C, sous Linux)"
+swiftc_bin="${QSID_SWIFTC:-$(command -v swiftc || true)}"
+if [ -z "$swiftc_bin" ] && [ -n "${swift_bin:-}" ]; then swiftc_bin="$(dirname "$swift_bin")/swiftc"; fi
+if [ -n "$swiftc_bin" ] && [ -x "$swiftc_bin" ]; then
+    if out="$(QSID_SWIFTC="$swiftc_bin" "$QSID_ROOT/scripts/typecheck-swift.sh" 2>&1)"; then
+        ok "typecheck-swift.sh"
+    else
+        bad "typecheck-swift.sh"; printf '%s\n' "$out" | tail -12 | sed 's/^/    /'
+    fi
+else
+    skip "typecheck Swift" "swiftc absent"
+fi
+
 echo "--- divers"
 if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
     ok "testdata/cube_20mm.stl (12 facettes)"

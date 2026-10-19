@@ -16,6 +16,8 @@ struct GCodeSceneView: UIViewRepresentable {
     let layerRange: ClosedRange<Int>
     let bed: SceneBed?
     let revision: Int
+    /// Part de la dernière couche affichée qui est dessinée (0…1) : curseur de mouvements.
+    var topProgress: Double = 1
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -29,7 +31,7 @@ struct GCodeSceneView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: SCNView, context: Context) {
-        context.coordinator.update(mesh: mesh, range: layerRange, bed: bed, revision: revision)
+        context.coordinator.update(mesh: mesh, range: layerRange, bed: bed, revision: revision, topProgress: topProgress)
     }
 
     // MARK: Coordinateur
@@ -45,6 +47,12 @@ struct GCodeSceneView: UIViewRepresentable {
         private var lastRevision = -1
         private var lastBedSignature = ""
         private var lastRange: ClosedRange<Int>?
+        private var lastTopProgress = 1.0
+        /// Pour chaque couche : le nœud des rubans, et le nombre d'indices par segment.
+        private var ribbonNodes: [SCNNode?] = []
+        private var indicesPerSegment = 18
+        private var partialNode: SCNNode?
+        private var hiddenRibbon: SCNNode?
 
         override init() {
             super.init()
@@ -76,23 +84,55 @@ struct GCodeSceneView: UIViewRepresentable {
 
         // MARK: Contenu
 
-        func update(mesh: GCodeMesh?, range: ClosedRange<Int>, bed: SceneBed?, revision: Int) {
+        func update(mesh: GCodeMesh?, range: ClosedRange<Int>, bed: SceneBed?, revision: Int, topProgress: Double) {
             if let bed { syncBed(bed) }
             if revision != lastRevision {
                 lastRevision = revision
                 rebuild(mesh)
                 lastRange = nil
+                lastTopProgress = -1
             }
             if range != lastRange {
                 lastRange = range
                 for (index, node) in layerNodes.enumerated() { node.isHidden = !range.contains(index) }
+                lastTopProgress = -1
             }
+            if topProgress != lastTopProgress {
+                lastTopProgress = topProgress
+                applyPartialTop(layer: range.upperBound, progress: topProgress)
+            }
+        }
+
+        /// Dessine seulement le début de la dernière couche affichée : on masque ses rubans
+        /// complets et on pose un nœud qui réutilise les mêmes sommets avec moins d'indices.
+        private func applyPartialTop(layer: Int, progress: Double) {
+            partialNode?.removeFromParentNode(); partialNode = nil
+            hiddenRibbon?.isHidden = false; hiddenRibbon = nil
+            guard progress < 0.999, layer >= 0, layer < ribbonNodes.count,
+                  let ribbon = ribbonNodes[layer], let geometry = ribbon.geometry,
+                  let element = geometry.elements.first else { return }
+            let segments = element.primitiveCount / (indicesPerSegment / 3)   // triangles par segment
+            let visible = Int(Double(segments) * max(progress, 0)) * indicesPerSegment
+            guard visible > 0 else { ribbon.isHidden = true; hiddenRibbon = ribbon; return }
+            let indexData = element.data.prefix(visible * MemoryLayout<UInt32>.size)
+            let partialElement = SCNGeometryElement(data: Data(indexData), primitiveType: .triangles,
+                                                    primitiveCount: visible / 3, bytesPerIndex: MemoryLayout<UInt32>.size)
+            let partial = SCNGeometry(sources: geometry.sources, elements: [partialElement])
+            partial.materials = geometry.materials
+            let node = SCNNode(geometry: partial)
+            layerNodes[layer].addChildNode(node)
+            ribbon.isHidden = true
+            hiddenRibbon = ribbon
+            partialNode = node
         }
 
         private func rebuild(_ mesh: GCodeMesh?) {
             layerNodes.forEach { $0.removeFromParentNode() }
             layerNodes = []
+            ribbonNodes = []
+            partialNode = nil; hiddenRibbon = nil
             guard let mesh else { return }
+            indicesPerSegment = mesh.fullDetail ? 18 : 6
             let ribbonMaterial = SCNMaterial()
             ribbonMaterial.lightingModel = .constant   // l'ombrage est déjà dans les couleurs des sommets
             ribbonMaterial.isDoubleSided = true
@@ -102,6 +142,7 @@ struct GCodeSceneView: UIViewRepresentable {
 
             for layer in mesh.layers {
                 let node = SCNNode()
+                var ribbon: SCNNode?
                 if !layer.indices.isEmpty {
                     let vertexCount = layer.positions.count / 3
                     let positions = layer.positions.withUnsafeBufferPointer { Data(buffer: $0) }
@@ -118,7 +159,8 @@ struct GCodeSceneView: UIViewRepresentable {
                     let element = SCNGeometryElement(indices: layer.indices, primitiveType: .triangles)
                     let geometry = SCNGeometry(sources: [source, colorSource], elements: [element])
                     geometry.materials = [ribbonMaterial]
-                    node.addChildNode(SCNNode(geometry: geometry))
+                    ribbon = SCNNode(geometry: geometry)
+                    node.addChildNode(ribbon!)
                 }
                 if !layer.travel.isEmpty {
                     var points: [SCNVector3] = []
@@ -134,6 +176,7 @@ struct GCodeSceneView: UIViewRepresentable {
                 }
                 contentNode.addChildNode(node)
                 layerNodes.append(node)
+                ribbonNodes.append(ribbon)
             }
             if mesh.boundsMax != mesh.boundsMin {
                 let lo = Vec3(Double(mesh.boundsMin.x), Double(mesh.boundsMin.y), 0)

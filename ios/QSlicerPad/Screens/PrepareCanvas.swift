@@ -32,6 +32,37 @@ struct PrepareCanvas: View {
 
             if model.scene?.objects.isEmpty ?? true { emptyState }
         }
+        .background(shortcuts)
+    }
+
+    private struct Nudge: Identifiable {
+        let id: String
+        let key: KeyEquivalent
+        let dx: Double
+        let dy: Double
+    }
+
+    private static let nudges = [
+        Nudge(id: "left", key: .leftArrow, dx: -1, dy: 0), Nudge(id: "right", key: .rightArrow, dx: 1, dy: 0),
+        Nudge(id: "up", key: .upArrow, dx: 0, dy: 1), Nudge(id: "down", key: .downArrow, dx: 0, dy: -1),
+    ]
+
+    /// Raccourcis clavier (clavier matériel iPad) : ⌥+flèches = 1 mm (⌥⇧ : 10 mm), ⌘D copie,
+    /// ⇧⌘A organise. Les modificateurs évitent de gêner la saisie dans les champs numériques.
+    private var shortcuts: some View {
+        Group {
+            ForEach(Self.nudges) { n in
+                Button("") { model.nudgeSelected(dx: n.dx, dy: n.dy) }
+                    .keyboardShortcut(n.key, modifiers: [.option])
+                Button("") { model.nudgeSelected(dx: n.dx * 10, dy: n.dy * 10) }
+                    .keyboardShortcut(n.key, modifiers: [.option, .shift])
+            }
+            Button("") { model.duplicateSelected() }.keyboardShortcut("d", modifiers: [.command])
+            Button("") { model.arrange() }.keyboardShortcut("a", modifiers: [.command, .shift])
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
     }
 
     // MARK: Bandeaux

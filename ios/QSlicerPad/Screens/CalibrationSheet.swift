@@ -33,7 +33,7 @@ struct CalibrationSheet: View {
                     Section {
                         field(L10n.t("Multiplicateur d'extrusion"), $multiplier)
                     } footer: {
-                        Text(L10n.t("Saisissez la meilleure valeur de la calibration grossière pour la affiner."))
+                        Text(L10n.t("Saisissez la meilleure valeur de la calibration grossière pour l'affiner."))
                     }
                 }
                 Section {

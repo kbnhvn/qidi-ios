@@ -176,7 +176,7 @@ struct PrinterStatus: Equatable {
 /// Corps multipart/form-data écrit sur disque, en flux.
 enum MultipartBody {
     static func write(file: URL, filename: String, fields: [String: String], boundary: String, to destination: URL) throws {
-        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: destination.path, contents: nil)
         let out = try FileHandle(forWritingTo: destination)
         defer { try? out.close() }
         func put(_ text: String) throws { try out.write(contentsOf: Data(text.utf8)) }

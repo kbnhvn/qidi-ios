@@ -31,8 +31,12 @@ struct AllSettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button(L10n.t("Terminé")) { dismiss() } }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L10n.t("Tout réinitialiser")) { model.overrides.resetAll() }
-                        .disabled(model.overrides.isEmpty)
+                    Menu {
+                        Button(L10n.t("Tout réinitialiser"), role: .destructive) { model.overrides.resetAll() }
+                            .disabled(model.overrides.isEmpty)
+                        Button(L10n.t("Préparer l'export .ini…")) { model.prepareConfigExport() }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .accessibilityLabel(L10n.t("Plus"))
                 }
             }
             .task { await model.loadSettingsCatalog() }
@@ -42,6 +46,17 @@ struct AllSettingsView: View {
     @ViewBuilder
     private func content(_ catalog: SettingsCatalog) -> some View {
         List {
+            if let url = model.exportedConfigURL {
+                Section {
+                    ShareLink(item: url) {
+                        Label(L10n.t("Partager la configuration effective (.ini)"), systemImage: "square.and.arrow.up")
+                            .frame(minHeight: 44)
+                    }
+                } footer: {
+                    Text(L10n.t("Réimportable dans QIDISlicer desktop ou ici via « Importer un profil »."))
+                }
+            }
+
             Section {
                 Picker(L10n.t("Niveau"), selection: $mode) {
                     ForEach(ConfigMode.allCases) { Text(L10n.t($0.label)).tag($0) }

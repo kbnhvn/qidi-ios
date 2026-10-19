@@ -137,6 +137,8 @@ jobs:
       - name: swift test
         working-directory: ios/QSlicerKit
         run: swift test
+      - name: Types du modèle et du pont C (stubs SwiftUI/UIKit)
+        run: scripts/typecheck-swift.sh
 
   host-gate:
     needs: configure-check

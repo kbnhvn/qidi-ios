@@ -54,6 +54,13 @@ if(APPLE)
         "-lc++")
 endif()
 
+# Banc de test : ASan/UBSan sur *notre* code seulement (l'amont reste non instrumenté).
+option(QSID_CORE_SANITIZE "Compile ios-core avec ASan+UBSan (tests Linux/macOS hôte)" OFF)
+if(QSID_CORE_SANITIZE)
+    target_compile_options(qidislice PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    target_link_options(qidislice PUBLIC -fsanitize=address,undefined)
+endif()
+
 set_target_properties(qidislice PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     CXX_VISIBILITY_PRESET hidden

@@ -27,6 +27,7 @@ struct SettingsView: View {
             .onChange(of: language) { _, newValue in
                 L10n.language = newValue
                 model.languageVersion += 1
+                model.refreshLanguage()
             }
         }
     }

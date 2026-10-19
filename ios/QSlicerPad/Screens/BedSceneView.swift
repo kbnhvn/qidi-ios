@@ -466,8 +466,10 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
                 }
             }
             drag = nil
-            lastScene = nil   // force la resynchronisation avec l'état du moteur
-            sync()
+            // La vue garde sa position jusqu'à ce que le moteur ait validé la transformation :
+            // `lastScene = nil` force la resynchronisation à la prochaine publication du modèle
+            // (sans retour en arrière visible entre-temps).
+            lastScene = nil
         default:
             break
         }

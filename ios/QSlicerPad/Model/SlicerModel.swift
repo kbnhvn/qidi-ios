@@ -127,6 +127,58 @@ final class SlicerModel: ObservableObject {
         clearScene()
     }
 
+    // MARK: Export de la configuration
+
+    @Published private(set) var exportedConfigURL: URL?
+
+    /// Écrit la configuration effective (preset + réglages) en .ini, réimportable dans QIDISlicer
+    /// desktop ou dans cette app (« Importer un profil »).
+    func prepareConfigExport() {
+        Task {
+            do {
+                let config = try await onEngine { try $0.effectiveConfig() }
+                let name = selection.print.isEmpty ? "configuration" : presetDisplayName(selection.print)
+                let url = workDirectory.appendingPathComponent("\(name).ini")
+                var text = "# QSlicerPad — configuration effective (preset + réglages)\n"
+                text += config.keys.sorted().map { "\($0) = \(config[$0]!)" }.joined(separator: "\n") + "\n"
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                exportedConfigURL = url
+            } catch {
+                errorMessage = "Export impossible : \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: Préréglages utilisateur (jeux de réglages nommés)
+
+    @Published private(set) var userPresets: [String: SliceOverrides] = {
+        guard let data = UserDefaults.standard.data(forKey: "qsid.userPresets"),
+              let saved = try? JSONDecoder().decode([String: SliceOverrides].self, from: data) else { return [:] }
+        return saved
+    }()
+
+    /// Enregistre les réglages actuels sous `name` (remplace un préréglage du même nom).
+    func saveUserPreset(named name: String) {
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, !overrides.isEmpty else { return }
+        userPresets[clean] = overrides
+        persistUserPresets()
+    }
+
+    func applyUserPreset(_ name: String) {
+        if let preset = userPresets[name] { overrides = preset }
+    }
+
+    func deleteUserPreset(_ name: String) {
+        userPresets[name] = nil
+        persistUserPresets()
+    }
+
+    private func persistUserPresets() {
+        guard let data = try? JSONEncoder().encode(userPresets) else { return }
+        UserDefaults.standard.set(data, forKey: "qsid.userPresets")
+    }
+
     // MARK: Caméra du plateau
 
     struct CameraRequest: Equatable {
@@ -278,6 +330,10 @@ final class SlicerModel: ObservableObject {
         if d.string(forKey: DefaultsKey.filament) == nil,
            let preferred = FilamentIndex.preferredDefault(filamentPresets), preferred != selection.filament {
             await applySelection(printer: nil, print: nil, filament: preferred)
+        }
+        if selection.printer.isEmpty {
+            // Préset mémorisé devenu introuvable (bundle mis à jour) : on repart des défauts.
+            await applySelection(printer: nil, print: nil, filament: nil)
         }
         isRestoring = false
         presetsReady = true
@@ -476,6 +532,9 @@ final class SlicerModel: ObservableObject {
     func setOption(_ key: String, _ value: String) { overrides.set(key, value, base: baseConfig) }
     func resetOption(_ key: String) { overrides.reset(key) }
 
+    /// À appeler quand la langue change : le catalogue des réglages suit.
+    func refreshLanguage() { settingsCatalog?.useFrench = !L10n.isEnglish }
+
     /// Charge (une fois) le schéma des options, la disposition des onglets et les traductions.
     func loadSettingsCatalog() async {
         guard settingsCatalog == nil, core != nil else { return }
@@ -574,6 +633,19 @@ final class SlicerModel: ObservableObject {
         canRedo = !redoStack.isEmpty
     }
 
+    /// Déplacement d'un pas (flèches du clavier ; ⇧ = 10 mm), borné au plateau.
+    func nudgeSelected(dx: Double, dy: Double) {
+        guard let object = selectedObject, let inst = object.instances.first, let bed = scene?.bed else { return }
+        let shift = BedBounds.clampingShift(min: Vec3(inst.min[0] + dx, inst.min[1] + dy, inst.min[2]),
+                                            max: Vec3(inst.max[0] + dx, inst.max[1] + dy, inst.max[2]), bed: bed)
+        transform(objectID: object.id, offset: [inst.offset[0] + dx + shift.x, inst.offset[1] + dy + shift.y, inst.offset[2]])
+    }
+
+    func duplicateSelected() {
+        guard let object = selectedObject else { return }
+        setInstanceCount(object.instances.count + 1, objectID: object.id)
+    }
+
     func deleteSelected() {
         guard let id = selectedObjectID else { return }
         mutateScene { try $0.removeObject(id) }
@@ -667,6 +739,8 @@ final class SlicerModel: ObservableObject {
 
         Task {
             defer { relay.stop() }
+            // Les réglages modifiés à l'instant doivent être dans le moteur avant de slicer.
+            await overridesSyncTask?.value
             // Un slicing dure de quelques secondes à quelques minutes : écran éveillé et
             // temps d'exécution en arrière-plan (iOS suspend sinon l'app en fond).
             let keepAwake = KeepAwake()
@@ -735,8 +809,9 @@ final class SlicerModel: ObservableObject {
         builder.hiddenRoles = hiddenRoles
         builder.includeTravel = showTravel
         let moves = gcodeMoves
+        let configured = builder   // copie immuable : capturée par la tâche détachée
         rebuildTask = Task {
-            let mesh = await Task.detached(priority: .userInitiated) { builder.build(moves: moves) }.value
+            let mesh = await Task.detached(priority: .userInitiated) { configured.build(moves: moves) }.value
             guard !Task.isCancelled else { return }
             gcodeMesh = mesh
         }
