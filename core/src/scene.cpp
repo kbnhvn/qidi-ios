@@ -412,8 +412,12 @@ int qsid_presets_select(qsid_ctx *ctx, const char *printer, const char *print, c
         // QIDI, à défaut un PLA générique, à défaut le premier compatible.
         if (filament && *filament) {
             const Slic3r::Preset *f = b.filaments.find_preset(filament, false, false);
-            if (f && f->is_compatible)
+            if (f && f->is_compatible) {
+                // Deux endroits : la collection (utilisée par full_config() avec un seul extrudeur)
+                // et la sélection par extrudeur (multi-matériaux).
+                b.filaments.select_preset_by_name(filament, true);
                 b.set_filament_preset(0, filament);
+            }
         } else if (b.filaments.get_selected_preset().is_default || !b.filaments.get_selected_preset().is_compatible) {
             const Slic3r::Preset *pick = nullptr;
             for (const char *wanted : {"QIDI PLA", "Generic PLA", ""}) {
@@ -431,8 +435,11 @@ int qsid_presets_select(qsid_ctx *ctx, const char *printer, const char *print, c
             if (!pick)
                 for (const Slic3r::Preset &f : b.filaments)
                     if (!f.is_default && f.is_visible && f.is_compatible) { pick = &f; break; }
-            if (pick)
-                b.set_filament_preset(0, pick->name);
+            if (pick) {
+                const std::string name = pick->name;
+                b.filaments.select_preset_by_name(name, true);
+                b.set_filament_preset(0, name);
+            }
         }
 
         ctx->base_config = b.full_config();

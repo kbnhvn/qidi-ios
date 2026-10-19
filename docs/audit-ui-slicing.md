@@ -7,6 +7,19 @@ Date : 19 octobre 2026 · Base auditée : `main` @ `de7db7e` (0.3.0 build 3)
 Légende : ✅ vérifié par une exécution (précisé) · 🟡 écrit et analysé (syntaxe + types du modèle/pont C
 sous Linux) mais **non exécuté** : il manque macOS/Xcode ou un iPad · ⛔ non fait.
 
+**Test de bout en bout du vrai modèle.** `scripts/e2e-linux.sh` compile le *vrai* `SlicerModel` et le *vrai*
+pont C (`QSlicerCore`) avec des substituts minimaux de SwiftUI/UIKit, le lie au moteur Linux et déroule un
+scénario complet (68 vérifications) : démarrage, presets, changement d'imprimante, import, déplacement,
+annuler/rétablir, hors-plateau, organiser, rotation, poser sur une face, copies, échelle, alerte d'unités,
+slicing, aperçu, réglages, préréglages, annulation du slicing, relance de l'app, export/import de profil,
+calibration. **Il a trouvé quatre vrais bugs** qu'aucune lecture n'avait vus :
+(1) `undo()` plantait à la première utilisation (violation d'exclusivité d'accès Swift : deux `inout`
+croisés sur les piles d'annulation) ; (2) le filament choisi n'était **pas appliqué** à la configuration
+(avec un seul extrudeur `PresetBundle::full_config()` lit la collection, pas la sélection par extrudeur) ;
+(3) à la première utilisation le filament par défaut n'était jamais proposé (valeur mémorisée lue après
+avoir été écrasée) ; (4) l'export `.ini` pouvait omettre un réglage saisi à l'instant (course avec la
+synchronisation différée). Tous corrigés, avec un contrôle dans la gate pour le n° 2.
+
 **Ce que « vérifié » veut dire ici.** J'ai compilé le moteur (libslic3r + notre ABI) sous Linux et exécuté
 les gates contre le vrai bundle QIDI : `scripts/linux-engine.sh`. Ce banc reproduit exactement les chiffres
 de la gate macOS (8 100 lignes, 6 757 mouvements, 100 couches, 1 397,9 mm). Il ne couvre pas Xcode, le SDK
@@ -36,7 +49,7 @@ variantes de buse du modèle, l'app ne garde que celles de l'imprimante choisie)
 | Phase | État |
 |---|---|
 | 0 correctifs | cf. tableau ci-dessus |
-| 1 ABI scène/presets/slicing incrémental | ✅ 24 nouvelles fonctions C, gate de scène (84 vérifications) verte sur le vrai moteur et le vrai bundle ; `PresetBundle` remplace la résolution Swift ; `Print` conservé entre slicings |
+| 1 ABI scène/presets/slicing incrémental | ✅ 24 nouvelles fonctions C, gate de scène (90 vérifications) verte sur le vrai moteur et le vrai bundle ; `PresetBundle` remplace la résolution Swift ; `Print` conservé entre slicings |
 | 2 plateau et manipulation | ✅ logique (rayons, caméra, aimantation, poser sur une face, hors-plateau : tests Linux + moteur) · 🟡 vue SceneKit, gestes, inspecteur. Fait : plateau + volume + socle QIDI, sélection, glisser, rotation à deux doigts, caméra, champs numériques, copies, organiser, centrer, orientation d'origine, annuler/rétablir, conversion d'unités, clavier. **Pas fait** : menu contextuel par appui long (remplacé par la barre d'actions), « tout sélectionner », coupe, simplification de maillage |
 | 3 aperçu G-code | ✅ construction de la géométrie (tests) · 🟡 rendu : rubans à la largeur/hauteur réelles, 7 modes de couleur, légende (durée, %), masquage par type, déplacements, double curseur de couches, curseur de mouvements, lecture |
 | 4 réglages | ✅ schéma du moteur + disposition des onglets de `Tab.cpp` (306 options, 19 pages, **toutes présentes dans le schéma**) + 1 433 traductions du bureau, Simple/Avancé/Expert, recherche · 🟡 vues. Fait : modifié/retour au preset, paramètres fréquents, préréglages nommés, export `.ini`. **Pas fait** : réglages par objet et modificateurs, enregistrer sous *héritant* d'un preset (les préréglages sont des jeux de surcharges) |

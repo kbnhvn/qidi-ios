@@ -134,6 +134,27 @@ int main(int argc, char **argv)
     check(!contains(prints, "@Q2 0.6 nozzle") && contains(prints, "@Q2 0.4 nozzle"),
           "impressions filtrées par la buse", prints.substr(0, 200));
 
+    // Le filament choisi doit réellement changer la configuration (température de buse).
+    {
+        char *cfg = nullptr;
+        check(qsid_config_base(ctx, &cfg) == QSID_OK, "config avec le filament par défaut");
+        const std::string pla_cfg = take(cfg);
+        check(qsid_presets_select(ctx, nullptr, nullptr, "QIDI ABS Odorless @Q2 0.4 nozzle", &json, err, sizeof(err)) == QSID_OK,
+              "sélection du filament ABS", err);
+        const std::string abs_sel = take(json);
+        check(contains(abs_sel, "\"filament\":\"QIDI ABS Odorless @Q2 0.4 nozzle\""), "le filament ABS est retenu", abs_sel);
+        check(qsid_config_base(ctx, &cfg) == QSID_OK, "config avec l'ABS");
+        const std::string abs_cfg = take(cfg);
+        auto temp = [](const std::string &c) {
+            const size_t p = c.find("\"temperature\":\"");
+            return p == std::string::npos ? -1.0 : std::strtod(c.c_str() + p + 15, nullptr);
+        };
+        check(temp(abs_cfg) > temp(pla_cfg) + 20, "l'ABS est plus chaud que le PLA (le filament est bien appliqué)",
+              std::to_string(temp(pla_cfg)) + " -> " + std::to_string(temp(abs_cfg)));
+        qsid_presets_select(ctx, nullptr, nullptr, "QIDI PLA Rapido @Q2 0.4 nozzle", &json, err, sizeof(err));
+        qsid_free(json);
+    }
+
     std::printf("configuration\n");
     check(qsid_config_base(ctx, &json) == QSID_OK, "config du preset");
     std::string base = take(json);

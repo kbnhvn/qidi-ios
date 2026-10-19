@@ -23,7 +23,8 @@ sans serveur et sans sous-processus (interdits par iOS).
 | Profils QIDI embarqués (24 imprimantes, 78 réglages, 858 filaments) | **🟡 résolution vérifiée localement** | chaînes `inherits` résolues sur le vrai bundle : `Q2 0.4 nozzle` → 94 clés, preset print → 188, filament → 89, fusion → 369 |
 | Progression + annulation du slicing | ✅ progression validée en gate ; annulation compilée | ABI `qsid_slice_async` / `qsid_cancel` au-dessus de `Print::apply/process/export_gcode` |
 | Plateau 3D, manipulation d'objets, aperçu G-code en rubans, tous les réglages | 🟡 écrit et analysé, **non compilé sous Xcode** | logique pure testée sous Linux (47 tests) ; types du modèle et du pont C vérifiés ; vues SwiftUI/SceneKit à compiler par la CI `ios-app` |
-| ABI v3 (scène, presets du moteur, slicing incrémental, vignettes, calibration) | ✅ gate de scène verte (84 vérifications) | exécutée sous Linux contre le vrai moteur et le bundle QIDI (`scripts/linux-engine.sh gate`) ; CI macOS : `host-gate` |
+| Modèle de l'app (`SlicerModel`) de bout en bout contre le vrai moteur | ✅ 68 vérifications (Linux) | `scripts/e2e-linux.sh` : presets, scène, annuler/rétablir, slicing, aperçu, réglages, calibration… (a trouvé 4 bugs) |
+| ABI v3 (scène, presets du moteur, slicing incrémental, vignettes, calibration) | ✅ gate de scène verte (90 vérifications) | exécutée sous Linux contre le vrai moteur et le bundle QIDI (`scripts/linux-engine.sh gate`) ; CI macOS : `host-gate` |
 | Envoi à l'imprimante (Moonraker) | 🟡 compilé, non exercé | `URLSession` : upload `server/files/upload` + `printer/print/start` + état |
 
 Autrement dit : **rien n'a encore été compilé ici** (l'environnement de rédaction est Linux, sans SDK

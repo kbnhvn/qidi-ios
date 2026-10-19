@@ -160,3 +160,7 @@ capturées dans `ios/QSlicerKit/Tests/QSlicerKitTests/Fixtures/engine/` et déco
 | `Screens/*.swift`, `BedSceneView`, `GCodeSceneView`, `ThumbnailRenderer` | SwiftUI / SceneKit / UIKit | analyse syntaxique sous Linux ; compilation par la CI `ios-app` ; recette iPad |
 
 Le paquet `QSlicerKit` ne duplique rien : ses sources sont des liens symboliques vers `ios/QSlicerPad/Core`.
+
+Le modèle reçoit ses chemins par `SlicerLocations` (bundle dans l'app, dossiers temporaires dans les
+tests) : c'est ce qui permet à `scripts/e2e-linux.sh` de faire tourner le vrai `SlicerModel` contre le vrai
+moteur (voir `docs/audit-ui-slicing.md`, « Test de bout en bout »).

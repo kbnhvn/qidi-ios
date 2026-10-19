@@ -12,6 +12,40 @@ import Foundation
 import SwiftUI
 import UIKit   // UIApplication : écran éveillé + tâche d'arrière-plan
 
+/// Où le modèle trouve ses fichiers. Dans l'app : le bundle et le conteneur ; dans les tests
+/// de bout en bout (Linux) : des dossiers temporaires et les ressources du dépôt.
+struct SlicerLocations {
+    /// Racine « qidi » (profils vendor, modèles de calibration), lue par le moteur.
+    var resourcesDirectory: URL
+    var dataDirectory: URL
+    var exportsDirectory: URL
+    var workDirectory: URL
+    var configPagesURL: URL?
+    var configFrenchURL: URL?
+
+    var vendorINI: URL { resourcesDirectory.appendingPathComponent("profiles/QIDITechnology.ini") }
+    var calibrationDirectory: URL { resourcesDirectory.appendingPathComponent("calib") }
+
+    static var bundle: SlicerLocations {
+        let fm = FileManager.default
+        func dir(_ url: URL) -> URL {
+            try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+        let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let docs = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return SlicerLocations(
+            resourcesDirectory: Bundle.main.resourceURL?.appendingPathComponent("qidi")
+                ?? URL(fileURLWithPath: NSTemporaryDirectory()),
+            dataDirectory: dir(support.appendingPathComponent("qidi-data", isDirectory: true)),
+            exportsDirectory: dir(docs.appendingPathComponent("Exports", isDirectory: true)),
+            workDirectory: dir(fm.temporaryDirectory.appendingPathComponent("qslicerpad", isDirectory: true)),
+            configPagesURL: Bundle.main.url(forResource: "config_pages", withExtension: "json"),
+            configFrenchURL: Bundle.main.url(forResource: "config_fr", withExtension: "json"))
+    }
+}
+
 @MainActor
 final class SlicerModel: ObservableObject {
 
@@ -89,8 +123,8 @@ final class SlicerModel: ObservableObject {
             errorMessage = "Calibration impossible : \(error)"
             return
         }
-        guard let url = Bundle.main.resourceURL?.appendingPathComponent("qidi/calib/\(plan.resource)"),
-              FileManager.default.fileExists(atPath: url.path) else {
+        let url = locations.calibrationDirectory.appendingPathComponent(plan.resource)
+        guard FileManager.default.fileExists(atPath: url.path) else {
             errorMessage = "Modèle de calibration absent du bundle."
             return
         }
@@ -135,6 +169,7 @@ final class SlicerModel: ObservableObject {
     /// desktop ou dans cette app (« Importer un profil »).
     func prepareConfigExport() {
         Task {
+            await overridesSyncTask?.value   // les réglages saisis à l'instant doivent être dans le moteur
             do {
                 let config = try await onEngine { try $0.effectiveConfig() }
                 let name = selection.print.isEmpty ? "configuration" : presetDisplayName(selection.print)
@@ -238,31 +273,11 @@ final class SlicerModel: ObservableObject {
 
     // MARK: Chemins
 
-    private let resourcesDirectory: URL = {
-        Bundle.main.resourceURL?.appendingPathComponent("qidi")
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-    }()
-
-    private let dataDirectory: URL = {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let dir = base.appendingPathComponent("qidi-data", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
-
-    private let exportsDirectory: URL = {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let dir = docs.appendingPathComponent("Exports", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
-
-    private let workDirectory: URL = {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("qslicerpad", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }()
+    private let locations: SlicerLocations
+    private var resourcesDirectory: URL { locations.resourcesDirectory }
+    private var dataDirectory: URL { locations.dataDirectory }
+    private var exportsDirectory: URL { locations.exportsDirectory }
+    private var workDirectory: URL { locations.workDirectory }
 
     private var core: SlicerCore?
     private let engineQueue = DispatchQueue(label: "qsid.engine", qos: .userInitiated)
@@ -283,7 +298,8 @@ final class SlicerModel: ObservableObject {
 
     // MARK: Cycle de vie
 
-    init() {
+    init(locations: SlicerLocations = .bundle) {
+        self.locations = locations
         restoreMoonraker()
         restoreOverrides()
         do {
@@ -296,13 +312,10 @@ final class SlicerModel: ObservableObject {
 
     var engineVersion: String { SlicerCore.version }
 
-    private var vendorINI: URL? {
-        Bundle.main.url(forResource: "QIDITechnology", withExtension: "ini", subdirectory: "qidi/profiles")
-    }
-
     private func bootstrap() async {
         guard core != nil else { return }
-        guard let vendorINI else {
+        let vendorINI = locations.vendorINI
+        guard FileManager.default.fileExists(atPath: vendorINI.path) else {
             errorMessage = "Profils QIDI absents du bundle."
             return
         }
@@ -321,13 +334,14 @@ final class SlicerModel: ObservableObject {
                 try core.selectPresets(printer: nil, print: nil, filament: nil)
                 return try core.presets(kind: "printer")
             }
-            printer = all?.first(where: { $0.contains("0.4") }) ?? all?.first
+            printer = all?.first(where: { $0 == "Q2 0.4 nozzle" }) ?? all?.first(where: { $0.contains("0.4") }) ?? all?.first
         }
+        // Lus *avant* la première sélection : elle écrit les valeurs mémorisées.
+        let storedPrint = d.string(forKey: DefaultsKey.print)
+        let storedFilament = d.string(forKey: DefaultsKey.filament)
         isRestoring = true
-        await applySelection(printer: printer,
-                             print: d.string(forKey: DefaultsKey.print),
-                             filament: d.string(forKey: DefaultsKey.filament))
-        if d.string(forKey: DefaultsKey.filament) == nil,
+        await applySelection(printer: printer, print: storedPrint, filament: storedFilament)
+        if storedFilament == nil,
            let preferred = FilamentIndex.preferredDefault(filamentPresets), preferred != selection.filament {
             await applySelection(printer: nil, print: nil, filament: preferred)
         }
@@ -540,12 +554,12 @@ final class SlicerModel: ObservableObject {
         guard settingsCatalog == nil, core != nil else { return }
         do {
             let schema = try await onEngine { try $0.configSchemaJSON() }
-            guard let pagesURL = Bundle.main.url(forResource: "config_pages", withExtension: "json"),
+            guard let pagesURL = locations.configPagesURL,
                   let pages = try? Data(contentsOf: pagesURL) else {
                 errorMessage = "Ressource des réglages absente."
                 return
             }
-            let french = Bundle.main.url(forResource: "config_fr", withExtension: "json").flatMap { try? Data(contentsOf: $0) }
+            let french = locations.configFrenchURL.flatMap { try? Data(contentsOf: $0) }
             settingsCatalog = try SettingsCatalog(schemaJSON: schema, layoutJSON: pages, frenchJSON: french,
                                                   useFrench: !L10n.isEnglish)
         } catch {
@@ -615,14 +629,26 @@ final class SlicerModel: ObservableObject {
         }
     }
 
-    func undo() { stepHistory(from: &undoStack, to: &redoStack) }
-    func redo() { stepHistory(from: &redoStack, to: &undoStack) }
+    func undo() {
+        guard let snap = undoStack.popLast() else { updateUndoFlags(); return }
+        if let current = currentSnapshot(matching: snap) { redoStack.append(current) }
+        restore(snap)
+    }
 
-    private func stepHistory(from source: inout [TransformSnapshot], to target: inout [TransformSnapshot]) {
-        guard let snap = source.popLast(),
-              let object = scene?.objects.first(where: { $0.id == snap.objectID }),
-              let current = snapshot(of: object, instance: snap.instance) else { updateUndoFlags(); return }
-        target.append(current)
+    func redo() {
+        guard let snap = redoStack.popLast() else { updateUndoFlags(); return }
+        if let current = currentSnapshot(matching: snap) { undoStack.append(current) }
+        restore(snap)
+    }
+
+    /// État actuel de l'instance visée par `snap` (pour pouvoir y revenir : rétablir / annuler).
+    /// Pas d'`inout` croisé entre les deux piles : l'exclusivité d'accès de Swift l'interdit.
+    private func currentSnapshot(matching snap: TransformSnapshot) -> TransformSnapshot? {
+        guard let object = scene?.objects.first(where: { $0.id == snap.objectID }) else { return nil }
+        return snapshot(of: object, instance: snap.instance)
+    }
+
+    private func restore(_ snap: TransformSnapshot) {
         updateUndoFlags()
         transform(objectID: snap.objectID, instance: snap.instance, offset: snap.offset,
                   rotationDeg: snap.rotationDeg, scale: snap.scale, recordUndo: false)
