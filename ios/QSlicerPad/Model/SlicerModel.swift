@@ -15,10 +15,24 @@ final class SlicerModel: ObservableObject {
 
     @Published private(set) var catalog = QIDIProfileCatalog(sections: [:], vendorName: nil)
     @Published var selectedPrinter: String = "" {
-        didSet { if selectedPrinter != oldValue { selectedPrint = catalog.printPresets(for: selectedPrinter).first ?? "" } }
+        didSet {
+            guard selectedPrinter != oldValue, !isRestoringSelection else { return }
+            // Changer d'imprimante : le preset d'impression et le filament doivent rester
+            // compatibles (sinon on slice, p. ex., une 0,6 mm avec un filament @Q2 0.4).
+            let prints = catalog.printPresets(for: selectedPrinter)
+            if !prints.contains(selectedPrint) { selectedPrint = prints.first ?? "" }
+            let filaments = catalog.filamentPresets(for: selectedPrinter)
+            if !filaments.contains(selectedFilament) { selectedFilament = filaments.first ?? "" }
+            persistSelection()
+        }
     }
-    @Published var selectedPrint: String = ""
-    @Published var selectedFilament: String = ""
+    @Published var selectedPrint: String = "" {
+        didSet { if !isRestoringSelection { persistSelection() } }
+    }
+    @Published var selectedFilament: String = "" {
+        didSet { if !isRestoringSelection { persistSelection() } }
+    }
+    private var isRestoringSelection = false
     /// Profil importé (export du bureau) : prioritaire sur le bundle si présent.
     @Published private(set) var importedProfile: URL?
 
@@ -129,10 +143,21 @@ final class SlicerModel: ObservableObject {
         if let importedProfile { return importedProfile.lastPathComponent }
         if hasEmbeddedProfiles && !selectedPrinter.isEmpty {
             let filament = selectedFilament.isEmpty ? "" : " / \(selectedFilament)"
-            let suffix = overrides.enabled ? " · options perso" : ""
+            let suffix = overrides.isEmpty ? "" : " · options perso"
             return "\(selectedPrinter) · \(selectedPrint)\(filament)\(suffix)"
         }
         return "Configuration générique embarquée (dépannage)"
+    }
+
+    /// Configuration du preset *sans* les réglages de l'utilisateur : référence pour
+    /// afficher les valeurs héritées et détecter ce qui a été modifié.
+    var presetConfig: [String: String] {
+        if let importedProfile, let text = try? String(contentsOf: importedProfile, encoding: .utf8) {
+            return QIDIProfileCatalog.iniDictionary(text)
+        }
+        guard hasEmbeddedProfiles, !selectedPrinter.isEmpty, !selectedPrint.isEmpty else { return [:] }
+        return catalog.resolvedConfig(printer: selectedPrinter, print: selectedPrint,
+                                      filament: selectedFilament.isEmpty ? nil : selectedFilament)
     }
 
     private var bundledGenericConfig: URL? {
@@ -144,16 +169,28 @@ final class SlicerModel: ObservableObject {
     private func restoreSelection() {
         let d = UserDefaults.standard
         let printers = catalog.printers
-        let stored = d.string(forKey: DefaultsKey.printer)
-        selectedPrinter = (stored.flatMap { printers.contains($0) ? $0 : nil }) ?? printers.first ?? ""
-
-        let prints = catalog.printPresets(for: selectedPrinter)
+        // Lire les valeurs mémorisées *avant* d'affecter quoi que ce soit : les
+        // observateurs réécrivent la sélection.
+        let storedPrinter = d.string(forKey: DefaultsKey.printer)
         let storedPrint = d.string(forKey: DefaultsKey.print)
-        selectedPrint = (storedPrint.flatMap { prints.contains($0) ? $0 : nil }) ?? prints.first ?? ""
-
-        let filaments = catalog.filamentPresets(for: selectedPrinter)
         let storedFilament = d.string(forKey: DefaultsKey.filament)
+
+        isRestoringSelection = true
+        defer { isRestoringSelection = false }
+
+        let printer = (storedPrinter.flatMap { printers.contains($0) ? $0 : nil })
+            ?? Self.defaultPrinter(in: printers)
+        selectedPrinter = printer
+        let prints = catalog.printPresets(for: printer)
+        selectedPrint = (storedPrint.flatMap { prints.contains($0) ? $0 : nil }) ?? prints.first ?? ""
+        let filaments = catalog.filamentPresets(for: printer)
         selectedFilament = (storedFilament.flatMap { filaments.contains($0) ? $0 : nil }) ?? filaments.first ?? ""
+    }
+
+    /// Première imprimante par défaut : une buse 0,4 mm (la plus courante) plutôt que
+    /// la première de la liste triée (« … 0.2 nozzle »).
+    private static func defaultPrinter(in printers: [String]) -> String {
+        printers.first(where: { $0.contains("0.4") }) ?? printers.first ?? ""
     }
 
     func persistSelection() {
@@ -252,22 +289,6 @@ final class SlicerModel: ObservableObject {
         guard let core else { return }
         let stlURL = workDirectory.appendingPathComponent(model.deletingPathExtension().lastPathComponent + ".stl")
         Task {
-            // Un slicing dure de quelques secondes à quelques minutes : on empêche
-            // la mise en veille et on demande du temps d'exécution en arrière-plan
-            // (iOS suspend sinon l'app dès qu'elle passe en fond).
-            UIApplication.shared.isIdleTimerDisabled = true
-            var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "qsid.slice") {
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
-            }
-            defer {
-                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
-                UIApplication.shared.isIdleTimerDisabled = false
-            }
-
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     DispatchQueue.global(qos: .userInitiated).async {
@@ -301,7 +322,17 @@ final class SlicerModel: ObservableObject {
         var config = bundledGenericConfig
         do {
             if let importedProfile {
-                config = importedProfile
+                // Un profil importé reste prioritaire, mais les réglages de l'utilisateur
+                // s'appliquent aussi par-dessus.
+                if overrides.isEmpty {
+                    config = importedProfile
+                } else {
+                    var merged = presetConfig
+                    for (key, value) in overrides.configEntries(basedOn: merged) { merged[key] = value }
+                    let url = workDirectory.appendingPathComponent("preset.ini")
+                    try QIDIProfileCatalog.iniText(merged).write(to: url, atomically: true, encoding: .utf8)
+                    config = url
+                }
             } else if hasEmbeddedProfiles, !selectedPrinter.isEmpty, !selectedPrint.isEmpty {
                 let url = workDirectory.appendingPathComponent("preset.ini")
                 try catalog.writeConfig(printer: selectedPrinter,
@@ -326,17 +357,28 @@ final class SlicerModel: ObservableObject {
         statusLine = nil
         errorMessage = nil
         let started = Date()
+        // Les callbacks arrivent du thread de slicing, plusieurs fois par seconde : on
+        // ne garde que la dernière valeur et on l'applique à cadence fixe (sinon des
+        // tâches non ordonnées pouvaient faire reculer la barre ou s'afficher après « Terminé »).
+        let progressRelay = ProgressRelay { [weak self] percent, text in
+            guard let self, self.isSlicing else { return }
+            if percent >= 0 { self.progress = Double(percent) / 100.0 }
+            if !text.isEmpty { self.progressText = text }
+        }
 
         Task {
+            defer { progressRelay.stop() }
+            // Un slicing dure de quelques secondes à quelques minutes : on empêche la
+            // mise en veille et on demande du temps d'exécution en arrière-plan
+            // (iOS suspend sinon l'app dès qu'elle passe en fond).
+            let keepAwake = KeepAwake()
+            defer { keepAwake.end() }
             do {
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     DispatchQueue.global(qos: .userInitiated).async {
                         do {
                             try core.slice(model: model, config: config, output: outputURL) { percent, text in
-                                Task { @MainActor in
-                                    if percent >= 0 { self.progress = Double(percent) / 100.0 }
-                                    self.progressText = text
-                                }
+                                progressRelay.push(percent: Int(percent), text: text)
                             }
                             continuation.resume()
                         } catch {
@@ -345,6 +387,7 @@ final class SlicerModel: ObservableObject {
                     }
                 }
 
+                progressRelay.stop()   // plus aucune mise à jour tardive après la fin
                 let elapsed = Date().timeIntervalSince(started)
                 let stats = Self.streamStats(gcode: outputURL)
                 self.output = SliceOutput(url: outputURL,
@@ -451,5 +494,61 @@ final class SlicerModel: ObservableObject {
                 self.uploadStatus = error.localizedDescription
             }
         }
+    }
+}
+
+// MARK: - Aides
+
+/// Écran éveillé + tâche d'arrière-plan pendant un calcul long.
+@MainActor
+final class KeepAwake {
+    private var task: UIBackgroundTaskIdentifier = .invalid
+
+    init() {
+        UIApplication.shared.isIdleTimerDisabled = true
+        task = UIApplication.shared.beginBackgroundTask(withName: "qsid.slice") { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        if task != .invalid {
+            UIApplication.shared.endBackgroundTask(task)
+            task = .invalid
+        }
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
+}
+
+/// Relais de progression : thread de slicing → thread principal, valeur la plus
+/// récente seulement, ~10 Hz.
+final class ProgressRelay: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: (percent: Int, text: String)?
+    private var timer: DispatchSourceTimer?
+    private let apply: @MainActor (Int, String) -> Void
+
+    init(apply: @escaping @MainActor (Int, String) -> Void) {
+        self.apply = apply
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        t.setEventHandler { [weak self] in self?.flush() }
+        t.resume()
+        timer = t
+    }
+
+    func push(percent: Int, text: String) {
+        lock.lock(); latest = (percent, text); lock.unlock()
+    }
+
+    private func flush() {
+        lock.lock(); let value = latest; latest = nil; lock.unlock()
+        guard let value else { return }
+        MainActor.assumeIsolated { apply(value.percent, value.text) }
+    }
+
+    func stop() {
+        timer?.cancel()
+        timer = nil
     }
 }

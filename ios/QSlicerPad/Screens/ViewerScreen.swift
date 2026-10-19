@@ -39,7 +39,7 @@ struct ViewerScreen: View {
                 .ignoresSafeArea(edges: .horizontal)
                 .onTapGesture(count: 2) { frameCamera() }
                 .overlay(alignment: .bottomTrailing) {
-                    Text(L10n.t("Deux doigts : orbite · pincement : zoom · double-tap : recadrer"))
+                    Text(L10n.t("Un doigt : orbite · deux doigts : déplacer · pincement : zoom · double-tap : recadrer"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .padding(10)

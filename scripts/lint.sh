@@ -165,6 +165,19 @@ for t in "$QSID_ROOT"/scripts/tests/*.py; do
     fi
 done
 
+echo "--- tests Swift (paquet QSlicerKit : profils, options, G-code… sous Linux)"
+swift_bin="${QSID_SWIFT:-$(command -v swift || true)}"
+if [ -n "$swift_bin" ]; then
+    if out="$(cd "$QSID_ROOT/ios/QSlicerKit" && "$swift_bin" test 2>&1)"; then
+        ok "swift test ($(printf '%s\n' "$out" | grep -oE 'Executed [0-9]+ tests' | tail -1))"
+    else
+        bad "swift test"
+        printf '%s\n' "$out" | grep -E "error|failed" | head -8 | sed 's/^/    /'
+    fi
+else
+    skip "swift test" "toolchain Swift absente (QSID_SWIFT=…/swift)"
+fi
+
 echo "--- divers"
 if [ "$(grep -c 'facet normal' "$QSID_ROOT/testdata/cube_20mm.stl")" = "12" ]; then
     ok "testdata/cube_20mm.stl (12 facettes)"

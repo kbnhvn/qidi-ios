@@ -15,6 +15,10 @@ struct QSlicerPadApp: App {
                 .environmentObject(model)
                 // Reconstruit l'interface quand la langue change dans les réglages.
                 .id(model.languageVersion)
+                // « Ouvrir dans QSlicerPad » (Fichiers, Mail, AirDrop…) : importer le fichier.
+                .onOpenURL { url in
+                    _ = model.acceptDroppedFiles([url])
+                }
         }
     }
 }

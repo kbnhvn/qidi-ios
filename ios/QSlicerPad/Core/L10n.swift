@@ -105,12 +105,7 @@ enum L10n {
         "Licence": "License",
         "Réglages de slicing": "Slicing settings",
         "Options de slicing…": "Slicing options…",
-        "Utiliser ces options": "Use these options",
-        "Elles s'appliquent par-dessus le profil QIDI choisi (supports, adhérence, remplissage…). Désactivées, le profil est utilisé tel quel.":
-            "They are applied on top of the selected QIDI profile (supports, adhesion, infill…). When off, the profile is used as-is.",
         "Supports": "Supports",
-        "Générer des supports": "Generate supports",
-        "Seuil d'inclinaison": "Overhang threshold",
         "Adhérence": "Bed adhesion",
         "Type": "Type",
         "Aucune": "None",
@@ -122,16 +117,12 @@ enum L10n {
         "Densité": "Density",
         "Qualité": "Quality",
         "Hauteur de couche": "Layer height",
-        "Celle du profil": "Profile default",
         "Périmètres": "Perimeters",
-        "Ceux du profil": "Profile default",
         "Température": "Temperature",
         "Buse": "Nozzle",
         "Le décalage s'ajoute à la température du filament du profil (utile pour un filament qui coule ou qui sous-extrude).":
             "The offset is added to the profile's filament temperature (handy for a filament that drools or under-extrudes).",
         "options perso": "custom options",
-        "Deux doigts : orbite · pincement : zoom · double-tap : recadrer":
-            "Two fingers: orbit · pinch: zoom · double-tap: frame",
         "Aucun modèle": "No model",
         "Aucun profil embarqué": "No embedded profile",
         "Importez un STL, 3MF, OBJ ou AMF — ou déposez le fichier dans l'app.":
@@ -144,6 +135,20 @@ enum L10n {
         "Isométrique": "Isometric",
         "Recadrer": "Frame",
         "Couche précédente": "Previous layer",
-        "Couche suivante": "Next layer"
+        "Couche suivante": "Next layer",
+
+        // Réglages fréquents
+        "Aucun preset résolu : les valeurs du profil ne sont pas affichées.":
+            "No preset resolved: profile values are not shown.",
+        "Aucun": "None",
+        "Sur le plateau uniquement": "Support on build plate only",
+        "Renforts uniquement": "For support enforcers only",
+        "Partout": "Everywhere",
+        "Modifié — revenir à la valeur du profil": "Modified — back to profile value",
+        "Tout remettre aux valeurs du profil": "Reset everything to profile values",
+        "Seuls les réglages que vous modifiez sont appliqués ; tout le reste vient du profil QIDI choisi.":
+            "Only the settings you change are applied; everything else comes from the chosen QIDI profile.",
+        "Un doigt : orbite · deux doigts : déplacer · pincement : zoom · double-tap : recadrer":
+            "One finger: orbit · two fingers: pan · pinch: zoom · double-tap: frame"
     ]
 }

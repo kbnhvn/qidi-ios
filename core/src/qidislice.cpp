@@ -166,6 +166,16 @@ int qsid_slice_async(qsid_ctx *ctx,
             std::lock_guard<std::mutex> lock(ctx->print_mutex);
             ctx->current_print = &print;
         }
+        // Déclaré après `print` : détruit avant lui, sur tous les chemins (retours
+        // anticipés, exceptions). Sans lui, qsid_cancel() pouvait appeler cancel()
+        // sur un Print déjà détruit.
+        struct PrintGuard {
+            qsid_ctx *c;
+            ~PrintGuard() {
+                std::lock_guard<std::mutex> lock(c->print_mutex);
+                c->current_print = nullptr;
+            }
+        } print_guard{ctx};
 
         print.set_status_callback([ctx, cb, user](const Slic3r::PrintBase::SlicingStatus &status) {
             if (ctx->cancel_requested.load(std::memory_order_relaxed))
@@ -192,6 +202,12 @@ int qsid_slice_async(qsid_ctx *ctx,
         // référence qui fonctionne). Sans elle, l'export G-code plantait sur un
         // contour dégénéré (ASan : set_object_range -> Polygon::douglas_peucker).
         {
+            // 0) poser chaque objet sur le plateau (Z min = 0), comme la CLI amont
+            //    (CLI/ProcessTransform.cpp). arrange_objects ne touche pas à Z : sans
+            //    cela un STL décalé en Z s'imprime en l'air ou sous le plateau.
+            for (Slic3r::ModelObject *mo : model.objects)
+                mo->ensure_on_bed();
+
             // 1) placement sur le plateau (gère aussi plusieurs objets)
             const Slic3r::Vec2crd gap{ Slic3r::s_multiple_beds.get_bed_gap() };
             Slic3r::arr2::ArrangeBed      bed =
@@ -245,11 +261,6 @@ int qsid_slice_async(qsid_ctx *ctx,
         };
         print.export_gcode(out_gcode, nullptr /* GCodeProcessorResult */, thumbnails);
 
-        {
-            std::lock_guard<std::mutex> lock(ctx->print_mutex);
-            ctx->current_print = nullptr;
-        }
-
         if (FILE *f = std::fopen(out_gcode, "rb")) {
             std::fclose(f);
         } else {
@@ -258,13 +269,9 @@ int qsid_slice_async(qsid_ctx *ctx,
         }
         return QSID_OK;
     } catch (const Slic3r::CanceledException &) {
-        std::lock_guard<std::mutex> lock(ctx->print_mutex);
-        ctx->current_print = nullptr;
         set_err(err_msg, err_len, "canceled");
         return QSID_ERR_CANCELED;
     } catch (const std::exception &e) {
-        std::lock_guard<std::mutex> lock(ctx->print_mutex);
-        ctx->current_print = nullptr;
         set_err(err_msg, err_len, e.what());
         return QSID_ERR_SLICE_FAILED;
     }

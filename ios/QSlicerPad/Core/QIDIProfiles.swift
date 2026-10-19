@@ -187,6 +187,24 @@ struct QIDIProfileCatalog {
         return config
     }
 
+    /// Lit un .ini plat (export de QIDISlicer desktop : `clé = valeur`, `#` commentaires).
+    static func iniDictionary(_ text: String) -> [String: String] {
+        var out: [String: String] = [:]
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.hasPrefix("#") || line.hasPrefix(";") || line.hasPrefix("[") { continue }
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            out[line[line.startIndex..<eq].trimmingCharacters(in: .whitespaces)] =
+                line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+        }
+        return out
+    }
+
+    /// Sérialise une configuration en .ini (clés triées : sortie déterministe).
+    static func iniText(_ config: [String: String]) -> String {
+        config.keys.sorted().map { "\($0) = \(config[$0]!)" }.joined(separator: "\n") + "\n"
+    }
+
     /// Écrit la configuration résolue dans un fichier .ini temporaire.
     /// `overrides` (réglages utilisateur) a la priorité sur le preset.
     func writeConfig(printer: String, print: String, filament: String?,
@@ -200,7 +218,6 @@ struct QIDIProfileCatalog {
                 NSLocalizedDescriptionKey: "Profil introuvable dans le bundle embarqué."
             ])
         }
-        let text = config.keys.sorted().map { "\($0) = \(config[$0]!)" }.joined(separator: "\n") + "\n"
-        try text.write(to: url, atomically: true, encoding: .utf8)
+        try Self.iniText(config).write(to: url, atomically: true, encoding: .utf8)
     }
 }

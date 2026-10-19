@@ -92,17 +92,30 @@ enum STLLoader {
         // SCNGeometrySource(vertices:) attend des SCNVector3 (pas des SIMD3<Float>).
         let points = mesh.vertices.map { SCNVector3($0.x, $0.y, $0.z) }
         let source = SCNGeometrySource(vertices: points)
+        // Sans normales, SceneKit n'ombre pas les faces : le modèle apparaît à plat.
+        // Normales par facette (arêtes vives conservées, ce qui convient à la CAO).
+        var normals: [SCNVector3] = []
+        normals.reserveCapacity(mesh.vertices.count)
+        for t in stride(from: 0, to: mesh.vertices.count - 2, by: 3) {
+            let a = mesh.vertices[t], b = mesh.vertices[t + 1], c = mesh.vertices[t + 2]
+            var n = simd_cross(b - a, c - a)
+            let length = simd_length(n)
+            n = length > 1e-12 ? n / length : SIMD3<Float>(0, 0, 1)
+            let v = SCNVector3(n.x, n.y, n.z)
+            normals.append(v); normals.append(v); normals.append(v)
+        }
+        let normalSource = SCNGeometrySource(normals: normals)
         let indices = (0..<Int32(mesh.vertices.count)).map { $0 }
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
 
         let material = SCNMaterial()
         material.diffuse.contents = color
         material.isDoubleSided = true
-        material.lightingModel = .physicallyBased
+        material.lightingModel = .blinn
         material.roughness.contents = 0.65
         material.metalness.contents = 0.05
 
-        let geometry = SCNGeometry(sources: [source], elements: [element])
+        let geometry = SCNGeometry(sources: [source, normalSource], elements: [element])
         geometry.materials = [material]
         return geometry
     }

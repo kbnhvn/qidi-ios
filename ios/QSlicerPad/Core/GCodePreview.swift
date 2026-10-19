@@ -20,12 +20,14 @@ struct GCodePreview {
     }
 
     private(set) var layers: [Layer] = []
+    /// Vrai si des couches au-delà de `maxLayers` ont été ignorées (signalé dans l'UI).
+    private(set) var truncated = false
     let bounds: (min: SIMD2<Float>, max: SIMD2<Float>)
 
     /// Parse un G-code en streaming (le fichier n'est jamais chargé entièrement).
     /// - Parameters:
     ///   - maxLayers: nombre de couches conservées (les suivantes sont ignorées).
-    static func parse(url: URL, maxLayers: Int = 2000) throws -> GCodePreview {
+    static func parse(url: URL, maxLayers: Int = 6000) throws -> GCodePreview {
         guard let stream = InputStream(url: url) else { throw CocoaError(.fileReadNoSuchFile) }
         stream.open()
         defer { stream.close() }
@@ -35,6 +37,7 @@ struct GCodePreview {
         var pendingLayerZ: Float?
         var x: Float = 0, y: Float = 0, z: Float = 0
         var absoluteE = true
+        var wasTruncated = false
         var lastE: Float = 0
         var lo = SIMD2<Float>(repeating: .greatestFiniteMagnitude)
         var hi = SIMD2<Float>(repeating: -.greatestFiniteMagnitude)
@@ -63,10 +66,21 @@ struct GCodePreview {
                 pendingLayerZ = value
                 return
             }
-            guard line.hasPrefix("G0") || line.hasPrefix("G1") else {
-                if line.hasPrefix("G90") { absoluteE = true }
-                else if line.hasPrefix("G91") { absoluteE = false }
-                else if line.hasPrefix("G92") { lastE = 0 }
+            // Mode d'extrusion : les profils QIDI sont en extrusion relative (M83).
+            // Ignorer M82/M83 faisait perdre ~63 % des trajectoires.
+            if line.hasPrefix("M83") { absoluteE = false; return }
+            if line.hasPrefix("M82") { absoluteE = true; return }
+            let isMove = line.hasPrefix("G0 ") || line.hasPrefix("G1 ") || line == "G0" || line == "G1"
+            guard isMove else {
+                // G90/G91 ne concernent que X/Y/Z (Klipper) : seul M82/M83 règle l'extrusion.
+                if line.hasPrefix("G92") {
+                    // G92 E<valeur> : remise à zéro (ou valeur) du compteur absolu.
+                    var value: Float = 0
+                    for token in line.split(separator: " ") where token.first == "E" {
+                        value = Float(token.dropFirst()) ?? 0
+                    }
+                    lastE = value
+                }
                 return
             }
             var nx = x, ny = y, nz = z
@@ -89,6 +103,7 @@ struct GCodePreview {
                 extruding = delta > 0.0001
                 lastE = absoluteE ? e : (lastE + e)
             }
+            if extruding && layers.count >= maxLayers { wasTruncated = true }
             if extruding && (nx != x || ny != y) && layers.count < maxLayers {
                 current.segments.append(SIMD2<Float>(x, y))
                 current.segments.append(SIMD2<Float>(nx, ny))
@@ -114,7 +129,9 @@ struct GCodePreview {
         flushLayer()
 
         let bounds = layers.isEmpty ? (SIMD2<Float>.zero, SIMD2<Float>.zero) : (lo, hi)
-        return GCodePreview(layers: layers, bounds: bounds)
+        var result = GCodePreview(layers: layers, bounds: bounds)
+        result.truncated = wasTruncated
+        return result
     }
 
     private init(layers: [Layer], bounds: (min: SIMD2<Float>, max: SIMD2<Float>)) {

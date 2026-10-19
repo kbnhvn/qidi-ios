@@ -66,7 +66,7 @@ struct ProfileSection: View {
                 SliceSettingsView().environmentObject(model)
             }
 
-            if let summary = model.overrides.summary {
+            if let summary = model.overrides.summary(base: model.presetConfig) {
                 Text(summary).font(.footnote).foregroundStyle(.secondary)
             }
 
