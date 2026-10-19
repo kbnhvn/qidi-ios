@@ -60,6 +60,7 @@ Pourquoi c'est plausible malgré tout :
    (`full` ajoute la gate hôte, qui exécute un slicing réel sur macOS).
 4. Télécharger l'artefact, puis installer avec **SideStore** : [`docs/sideloading.md`](docs/sideloading.md).
 - Recette pas-à-pas sur l'appareil : `docs/recette-ipad.md`
+- Audit UI/UX + qualité de slicing et plan de travail : `docs/audit-ui-slicing.md`
 
 > **Quota Actions.** Les runners macOS comptent **×10** en minutes. Mesuré sur ce projet :
 > `configure` ≈ 15 s, `deps-smoke` ≈ 1 min, `engine` (moteur + app + IPA, cache chaud) ≈ 5 min,
