@@ -51,7 +51,15 @@ echo "==> compilation du test (SlicerModel + QSlicerCore + Core/*.swift)"
     "$A/Core/BedGeometry.swift" "$A/Core/L10n.swift" \
     "${link_args[@]}" -o "$W/e2e"
 
+echo "==> Moonraker simulé"
+python3 "$QSID_ROOT/scripts/e2e/mock_moonraker.py" 0 "$W/moonraker.json" "$W/moonraker.port" &
+MOCK_PID=$!
+trap 'kill $MOCK_PID 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do [ -s "$W/moonraker.port" ] && break; sleep 0.1; done
+
 echo "==> exécution"
+QSID_MOCK_MOONRAKER="http://127.0.0.1:$(cat "$W/moonraker.port")" \
+QSID_MOCK_JOURNAL="$W/moonraker.json" \
 QSID_RESOURCES_DIR="${QSID_RESOURCES_DIR:-$QSID_SRC/resources}" \
 QSID_CONFIG_DIR="$A/Resources/config" \
 QSID_E2E_OUT="$W/out" \

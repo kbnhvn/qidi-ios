@@ -71,7 +71,6 @@ struct PreviewCanvas: View {
             .padding(10)
         }
         .onChange(of: model.gcodeMesh?.layers.count) { _, _ in
-            revision += 1
             upper = Int.max
             lower = 0
             topProgress = 1
@@ -79,9 +78,7 @@ struct PreviewCanvas: View {
         }
         .onChange(of: upper) { _, _ in if !playing { topProgress = 1 } }
         .task(id: playing) { await play() }
-        .onChange(of: model.colorMode) { _, _ in revision += 1 }
-        .onChange(of: model.hiddenRoles) { _, _ in revision += 1 }
-        .onChange(of: model.showTravel) { _, _ in revision += 1 }
+        .onChange(of: model.gcodeMeshGeneration) { _, _ in revision += 1 }
         .onAppear { revision += 1 }
     }
 }

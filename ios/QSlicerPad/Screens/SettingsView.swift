@@ -50,8 +50,8 @@ struct SettingsView: View {
             if let status = model.printerStatus {
                 Text("\(L10n.t(status.stateLabel))" + (status.nozzle.map { String(format: " · %.0f °C", $0) } ?? ""))
                     .font(.footnote).foregroundStyle(.secondary)
-            } else if let status = model.uploadStatus {
-                Text(status).font(.footnote).foregroundStyle(.secondary)
+            } else if let error = model.printerError {
+                Text(error).font(.footnote).foregroundStyle(.red)
             }
         } header: {
             Text(L10n.t("Imprimante (Moonraker)"))

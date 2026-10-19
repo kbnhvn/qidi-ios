@@ -210,6 +210,46 @@ func run() async -> Int32 {
     check((model.settingsCatalog?.options.count ?? 0) > 300, "catalogue des réglages chargé depuis le moteur", "\(model.settingsCatalog?.options.count ?? 0)")
     check(model.settingsCatalog?.label(model.settingsCatalog!.options["layer_height"]!) == "Hauteur de couche", "libellés en français")
 
+    print("envoi à l'imprimante (Moonraker simulé)")
+    if let base = env["QSID_MOCK_MOONRAKER"], let url = URL(string: base), let port = url.port,
+       let journalPath = env["QSID_MOCK_JOURNAL"] {
+        // le résultat courant : celui de « slicing 2 » ou plus tard ; on s'assure d'en avoir un à jour
+        if model.output == nil || model.resultIsStale {
+            model.slice()
+            _ = await waitUntil(300, "slicing avant envoi") { model.output != nil && !model.isSlicing && !model.resultIsStale }
+        }
+        model.moonraker = MoonrakerConfig(host: "127.0.0.1", port: port, apiKey: "secret-test")
+        check(model.moonraker.isConfigured, "imprimante configurée")
+        model.refreshPrinterStatus()
+        _ = await waitUntil(15, "état") { model.printerStatus != nil }
+        check(model.printerStatus?.state == "standby" && model.printerStatus?.nozzle == 219.6, "état lu (repos, 219,6 °C)",
+              "\(String(describing: model.printerStatus))")
+        let expectedSize = model.output?.sizeBytes ?? -1
+        let expectedName = model.output?.url.lastPathComponent ?? ""
+        var sawProgress = false
+        model.uploadAndPrint()
+        let done = await waitUntil(60, "envoi") {
+            if let p = model.uploadProgress, p > 0 { sawProgress = true }
+            return model.uploadStatus == "Impression lancée."
+        }
+        check(done, "envoi terminé et impression lancée", model.errorMessage ?? "\(String(describing: model.uploadStatus))")
+        let journal = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: journalPath)))) as? [String: Any]
+        let uploads = journal?["uploads"] as? [[String: Any]] ?? []
+        check(uploads.count == 1, "un fichier reçu par l'imprimante")
+        check(uploads.first?["filename"] as? String == expectedName, "nom de fichier", "\(String(describing: uploads.first?["filename"]))")
+        check(uploads.first?["root"] as? String == "gcodes", "dépôt dans « gcodes »")
+        check((uploads.first?["size"] as? Int).map(Int64.init) == expectedSize, "taille reçue = taille du G-code",
+              "\(String(describing: uploads.first?["size"])) vs \(expectedSize)")
+        check((uploads.first?["head"] as? String)?.hasPrefix(";") == true, "contenu : G-code (commentaire en tête)")
+        check((journal?["started"] as? [String])?.first == expectedName, "démarrage demandé pour ce fichier")
+        check((journal?["api_keys"] as? [String])?.allSatisfy { $0 == "secret-test" } == true, "clé API envoyée")
+        _ = await waitUntil(15, "état après envoi") { model.printerStatus?.state == "printing" }
+        check(model.printerStatus?.state == "printing" && model.printerStatus?.progress == 0.5, "état : impression en cours à 50 %")
+        _ = sawProgress   // la progression est un événement rapide : on ne l'exige pas sur un envoi local
+    } else {
+        print("  (ignoré : QSID_MOCK_MOONRAKER absent)")
+    }
+
     print("annulation du slicing")
     model.importModel(from: testdata.appendingPathComponent("cube_20mm.stl"))
     _ = await waitUntil(30, "second cube") { model.scene?.objects.count == 2 }

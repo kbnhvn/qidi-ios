@@ -235,6 +235,9 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var output: SliceOutput?
     @Published private(set) var summary: SliceSummary?
     @Published private(set) var gcodeMesh: GCodeMesh?
+    /// Incrémenté à chaque nouvelle géométrie d'aperçu (même nombre de couches ≠ même contenu :
+    /// changement de couleur, types masqués…) ; la vue 3D se reconstruit sur ce compteur.
+    @Published private(set) var gcodeMeshGeneration = 0
     /// Vrai quand la scène ou les réglages ont changé depuis le dernier slicing.
     @Published private(set) var resultIsStale = false
 
@@ -266,6 +269,8 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var uploadStatus: String?
     @Published private(set) var uploadProgress: Double?
     @Published private(set) var printerStatus: PrinterStatus?
+    /// Dernière erreur de lecture de l'état (réseau, adresse…), distincte du message d'envoi.
+    @Published private(set) var printerError: String?
 
     // MARK: Réglages complets (chargés à la demande)
 
@@ -705,6 +710,7 @@ final class SlicerModel: ObservableObject {
         selectedObjectID = nil
         meshes.removeAll()
         output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []
+        gcodeMeshGeneration += 1
     }
 
     private func mutateScene(_ work: @escaping (SlicerCore) throws -> Void) {
@@ -830,7 +836,7 @@ final class SlicerModel: ObservableObject {
 
     /// Reconstruit la géométrie de l'aperçu (hors du thread principal).
     private func rebuildPreview() {
-        guard !gcodeMoves.isEmpty else { gcodeMesh = nil; return }
+        guard !gcodeMoves.isEmpty else { gcodeMesh = nil; gcodeMeshGeneration += 1; return }
         rebuildTask?.cancel()
         var builder = GCodeMeshBuilder()
         builder.mode = colorMode
@@ -842,6 +848,7 @@ final class SlicerModel: ObservableObject {
             let mesh = await Task.detached(priority: .userInitiated) { configured.build(moves: moves) }.value
             guard !Task.isCancelled else { return }
             gcodeMesh = mesh
+            gcodeMeshGeneration += 1
         }
     }
 
@@ -895,10 +902,10 @@ final class SlicerModel: ObservableObject {
         Task {
             do {
                 printerStatus = try await client.status()
-                if !isUploading { uploadStatus = nil }
+                printerError = nil
             } catch {
                 printerStatus = nil
-                uploadStatus = error.localizedDescription
+                printerError = error.localizedDescription
             }
         }
     }

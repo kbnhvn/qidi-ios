@@ -55,6 +55,8 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     private var lastSelection: UInt64?
     private var lastMeshCounts: [UInt64: Int] = [:]
     private var handledCameraToken = 0
+    /// Le premier cadrage se fait avant que la vue ait sa taille : on le refait une fois, taille connue.
+    private var framedWithRealSize = false
 
     // état d'un geste
     private enum Drag {
@@ -134,8 +136,12 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     // MARK: Synchronisation avec le modèle
 
     func sync() {
-        guard view != nil else { return }
+        guard let view else { return }
         handleCameraRequest()
+        if !framedWithRealSize, view.bounds.width > 10, model.scene != nil {
+            framedWithRealSize = true
+            frameBed()
+        }
 
         let scene = model.scene
         let selection = model.selectedObjectID

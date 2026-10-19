@@ -294,6 +294,9 @@ struct PrinterSection: View {
             if let status = model.uploadStatus {
                 Text(status).font(.footnote).foregroundStyle(.secondary)
             }
+            if let error = model.printerError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
             Button(L10n.t("Actualiser l'état")) { model.refreshPrinterStatus() }
                 .frame(minHeight: 44)
                 .disabled(!model.moonraker.isConfigured)
