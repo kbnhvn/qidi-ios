@@ -1,76 +1,111 @@
 # Recette sur iPad
 
-À faire après avoir installé `QSlicerPad-unsigned.ipa` (voir `docs/sideloading.md`).
-Chaque ligne se termine par **vu ✅ / cassé ✗** — c'est ce retour qui pilote la
-correction suivante, il n'y a pas de Mac dans la boucle.
+À faire après avoir installé `QSlicerPad-unsigned.ipa` (voir `docs/sideloading.md`). Chaque ligne se
+termine par **vu ✅ / cassé ✗** — ce retour pilote la correction suivante, il n'y a pas de Mac dans la boucle.
 
-Version testée : `Réglages → À propos` (ou la ligne « Moteur » de l'écran
-principal). Note-la ici : ..............................
+Version testée : `Réglages → À propos` (ligne « Moteur » de l'inspecteur). Note-la ici : ..............
 
-## 1. Démarrage et disposition
+> Ce que la recette doit surtout établir : **les vues SwiftUI/SceneKit n'ont jamais tourné** (le moteur,
+> lui, est vérifié sous Linux par `scripts/linux-engine.sh gate`). Les lignes marquées ★ sont les plus
+> susceptibles de casser.
 
-- [ ] L'app s'ouvre sans écran blanc ni fermeture immédiate (pas de crash au lancement).
-- [ ] En **paysage**, deux colonnes : profils à gauche, modèle/slicing à droite.
-- [ ] En **portrait**, la colonne de gauche se replie ; le bouton « II » en haut à
-      gauche la réaffiche.
-- [ ] Le sélecteur **Imprimante / Réglages d'impression / Filament** propose les
-      profils QIDI (X-Max 3, X-Plus 3, X-Smart 3…) — c'est la preuve que les
-      profils embarqués sont bien lus.
-- [ ] Basculer en **Split View** (autre app à côté) et redimensionner : la
-      disposition suit, rien n'est coupé.
+## 1. Démarrage
+
+- [ ] L'app s'ouvre sans écran blanc ni fermeture immédiate.
+- [ ] ★ Après quelques secondes, le plateau 3D apparaît (surface grise, quadrillage, volume d'impression en
+      fil de fer, socle sombre sous le plateau, repère rouge/vert à l'origine).
+- [ ] L'inspecteur (à droite en paysage ; bouton « Réglages » en bas en portrait / Split View étroite) propose
+      imprimante, réglages d'impression et filament ; **une buse 0,4 mm est présélectionnée**.
+- [ ] Changer d'imprimante (ex. X-Plus 3 0.6) : le plateau change de taille ; le preset d'impression et le
+      filament proposés correspondent à la buse (« … @X-Plus 3 0.6 nozzle »).
+- [ ] Fermer et relancer l'app : imprimante, preset et filament sont retrouvés (B5).
 
 ## 2. Import
 
-- [ ] « Importer un modèle… » ouvre le sélecteur de Fichiers (STL, 3MF, OBJ, AMF).
-- [ ] **Glisser-déposer** un STL depuis Fichiers (app en Split View) : le modèle
-      apparaît sans passer par le bouton.
-- [ ] Glisser un `.ini` exporté de QIDISlicer desktop sur l'app : le profil actif
-      change (« Revenir aux profils embarqués » apparaît).
+- [ ] « + » (ou ⌘O) ouvre Fichiers (STL, 3MF, OBJ, AMF) ; le modèle apparaît **posé sur le plateau**, sélectionné (vert).
+- [ ] Importer un second modèle : il se place à côté, sans chevaucher le premier ni le déplacer.
+- [ ] Glisser-déposer un STL depuis Fichiers (Split View) : même résultat. Un `.ini` exporté du bureau déposé
+      sur l'app : « Profil importé » apparaît dans l'inspecteur.
+- [ ] « Ouvrir dans QSlicerPad » depuis Fichiers importe le fichier (B9).
+- [ ] Un STL en pouces (ex. un cube de 0,8) déclenche le bandeau « semble être en pouces » avec « Convertir ».
 
-## 3. Visualiseur
+## 3. Plateau : gestes ★
 
-- [ ] « Voir en 3D » ouvre une **feuille** avec un bouton « Terminé » bien visible.
-- [ ] « Terminé » referme et rend l'écran principal (on ne reste pas coincé).
-- [ ] **Un doigt** : orbite ; **pincement** : zoom ; **double-tap** : recadre.
-- [ ] Les quatre boutons du bas (Recadrer / Dessus / Face / Isométrique) changent
-      réellement la vue — c'est le point qui ne répondait pas.
-- [ ] Pas-à-pas de couche (−/+) et curseur : l'aperçu G-code se dessine couche par
-      couche, l'indice Z suit.
+- [ ] **Un doigt dans le vide** : la caméra tourne. **Deux doigts** : panoramique. **Pincement** : zoom.
+      **Double toucher** : recadre sur le plateau.
+- [ ] **Un doigt sur un objet** : il se déplace en suivant le doigt (pas de saut) ; relâché, il reste là.
+- [ ] Pousser un objet hors du plateau : il devient **rouge** et une vibration signale la sortie ; le bandeau
+      « Un objet sort du plateau » propose « Organiser ».
+- [ ] **Rotation à deux doigts** sur l'objet sélectionné : il tourne autour de Z et s'aimante tous les 15°.
+- [ ] Toucher un objet le sélectionne ; toucher le vide désélectionne.
+- [ ] Les quatre boutons de vue (Recadrer / Dessus / Face / Isométrique) changent réellement la vue.
+- [ ] Barre d'actions : Dupliquer, Poser sur une face (toucher une face incline l'objet pour qu'elle repose
+      sur le plateau), Poser sur le plateau, Centrer, Orientation d'origine, Organiser, Supprimer.
+- [ ] Annuler / Rétablir (⌘Z / ⇧⌘Z) défont un déplacement et une rotation.
+- [ ] Clavier : ⌥+flèches = 1 mm, ⌥⇧+flèches = 10 mm, ⌘D copie, ⇧⌘A organise.
 
-## 4. Options de slicing
+## 4. Inspecteur : manipulation d'objet
 
-- [ ] « Options de slicing… » s'ouvre depuis la barre latérale **et** depuis la
-      barre d'outils du détail (utile si la barre latérale est masquée).
-- [ ] Activer « Utiliser ces options » puis cocher **Supports** : le récapitulatif
-      apparaît sur l'écran principal (« supports · remplissage 15 % »).
-- [ ] Les réglages survivent à un redémarrage de l'app (ils sont mémorisés).
+- [ ] Position X/Y/Z, rotation, échelle (%) et taille (mm) reflètent l'objet et **le déplacent** quand on les édite.
+- [ ] « Proportions verrouillées » : changer la taille X change aussi Y et Z.
+- [ ] « Copies » (+/−) ajoute/retire des instances décalées.
+- [ ] Après une échelle ou une rotation, l'objet reste posé sur le plateau.
 
-## 5. Slicing (le cœur)
+## 5. Réglages
 
-- [ ] Un modèle importé + « Slicer » : la progression avance (pas figée à 0 %).
-- [ ] L'écran ne s'éteint pas pendant le slicing.
-- [ ] « Annuler » arrête vraiment et l'app reste utilisable.
-- [ ] Le résultat affiche lignes / couches / taille / durée.
-- [ ] « Aperçu G-code » : le modèle est centré sur le plateau (ses coordonnées
-      doivent rester X=110, Y=110 mm).
-- [ ] Mettre l'app en arrière-plan pendant un slicing : soit il continue (tâche
-      d'arrière-plan), soit il est suspendu **sans** faire planter l'app au retour.
-- [ ] « Partager / exporter le G-code » : le G-code part bien vers Fichiers ou une
-      autre app.
+- [ ] « Paramètres fréquents » : Supports (4 choix), Remplissage (±5 %), Bordure — le résumé orange apparaît.
+- [ ] « Plus de réglages rapides… » : adhérence, hauteur de couche (bornée par la buse), périmètres, température.
+- [ ] ★ « Tous les réglages… » : onglets Impression / Filament / Imprimante, pages, groupes ; niveau
+      Simple/Avancé/Expert ; recherche (« remplissage », « infill ») ; l'aide (?) s'affiche ; un point orange
+      signale une valeur modifiée et « Valeur du profil » la restaure.
+- [ ] Une valeur invalide (texte dans un champ numérique) est refusée sans planter.
+- [ ] « Mes préréglages » enregistre et rappelle un jeu de réglages ; « Préparer l'export .ini » produit un
+      fichier partageable.
+- [ ] Les réglages survivent à un redémarrage.
+- [ ] Filament : « Filament » ouvre une liste groupée par matière (PLA, PETG, ABS…) avec recherche.
 
-## 6. Impression
+## 6. Slicing
 
-- [ ] `Réglages` : adresse Moonraker + port enregistrés, bouton de test.
-- [ ] « Actualiser l'état » renvoie l'état de l'imprimante (si elle est allumée).
-- [ ] « Envoyer et lancer l'impression » envoie le G-code puis démarre le job.
+- [ ] « Slicer » (⌘↩) : la progression avance (pas figée à 0 %), l'écran ne s'éteint pas.
+- [ ] « Annuler » arrête vraiment ; l'app reste utilisable ; un nouveau slicing fonctionne ensuite.
+- [ ] À la fin, l'app passe en mode **Aperçu**.
+- [ ] Mettre l'app en arrière-plan pendant un slicing : il continue ou est suspendu **sans** planter au retour.
+- [ ] Changer un réglage puis « Re-slicer » est nettement plus rapide que le premier slicing (Print conservé).
 
-## 7. Ce qu'il ne faut pas attendre
+## 7. Aperçu G-code ★
 
-- STEP/OCCT, connexion QIDI Cloud, TestFlight : non implémentés (voir
-  `docs/risks.md` et la feuille de route).
+- [ ] Les trajectoires apparaissent en rubans colorés (périmètres jaune/orange, remplissage rouge sombre…) ;
+      **aucun trou** dans les parois (B1).
+- [ ] La légende liste les types avec durée et pourcentage ; toucher un type le masque.
+- [ ] Menu « Couleur » : vitesse, hauteur, largeur, ventilateur, température, débit — un dégradé s'affiche.
+- [ ] « Déplacements à vide » affiche/masque les déplacements.
+- [ ] Double curseur de couches (à droite) : la plage visible change ; le curseur « Mouvements » dessine le
+      début de la couche du haut ; ▶ rejoue couche par couche.
+- [ ] Durée estimée, filament (g, m) et nombre de couches sont plausibles (cube de 20 mm : ≈ 17 min, 100 couches).
+- [ ] Modifier le plateau marque l'aperçu « obsolète ».
+- [ ] « Partager / exporter le G-code » : le fichier part vers Fichiers ou une autre app ; ouvert dans
+      QIDISlicer desktop, il montre la même chose.
+
+## 8. Imprimante
+
+- [ ] `Réglages` : adresse Moonraker + port enregistrés ; « Tester la connexion » affiche l'état.
+- [ ] La section « Imprimante » montre état, fichier, progression et températures (rafraîchis toutes les 5 s).
+- [ ] « Envoyer et lancer l'impression » : barre de progression d'envoi, puis le job démarre.
+- [ ] Sur l'écran de l'imprimante, **l'aperçu du fichier (vignette)** s'affiche (B8).
+
+## 9. Calibration
+
+- [ ] Menu « Calibration » → « Pressure Advance (tour) » : un bandeau « réglages temporaires » apparaît, une
+      tour est posée ; le G-code contient `M900 K…` par marche de 5 mm.
+- [ ] « Quitter » restaure les réglages d'origine et vide le plateau.
+- [ ] « Débit — calibration grossière » charge le 3MF de 10 pièces, impression séquentielle (`M221`).
+
+## 10. Ce qu'il ne faut pas attendre
+
+- Réglages par objet / modificateurs, coupe, simplification, QIDI Box, calibration de vitesse volumétrique,
+  découverte réseau, STEP/OCCT, connexion QIDI Cloud, TestFlight : non implémentés (voir `roadmap.md`).
 
 ## Retour utile
 
-Pour chaque ✗ : l'écran concerné, ce que tu fais, ce qui se passe (ou pas), et si
-possible une capture. Une capture d'écran suffit à localiser la plupart des
-problèmes de disposition.
+Pour chaque ✗ : l'écran concerné, ce que tu fais, ce qui se passe (ou pas), et si possible une capture. Une
+capture d'écran suffit à localiser la plupart des problèmes de disposition.

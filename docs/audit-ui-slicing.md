@@ -2,6 +2,55 @@
 
 Date : 19 octobre 2026 · Base auditée : `main` @ `de7db7e` (0.3.0 build 3)
 
+## Suivi d'implémentation (mise à jour après le travail des phases 0 à 6)
+
+Légende : ✅ vérifié par une exécution (précisé) · 🟡 écrit et analysé (syntaxe + types du modèle/pont C
+sous Linux) mais **non exécuté** : il manque macOS/Xcode ou un iPad · ⛔ non fait.
+
+**Ce que « vérifié » veut dire ici.** J'ai compilé le moteur (libslic3r + notre ABI) sous Linux et exécuté
+les gates contre le vrai bundle QIDI : `scripts/linux-engine.sh`. Ce banc reproduit exactement les chiffres
+de la gate macOS (8 100 lignes, 6 757 mouvements, 100 couches, 1 397,9 mm). Il ne couvre pas Xcode, le SDK
+iOS, SwiftUI/SceneKit ni l'appareil : les vues sont en 🟡, la CI `ios-app` et la recette iPad les jugeront.
+
+| Bug | État | Preuve |
+|---|---|---|
+| B1 aperçu perdait ~63 % des trajectoires (M83) | ✅ supprimé à la source | l'aperçu n'analyse plus le texte : il lit les mouvements calculés par le moteur (`qsid_gcode_moves`) ; test de non-régression sur le parseur retiré remplacé par la gate (30 006 mouvements, rôles et couches cohérents) |
+| B2 `ensure_on_bed` absent | ✅ | gate : cubes décalés de +30 et −5 mm en Z → G-code **identique** au cube posé (hôte) ; scène : « posé sur le plateau (Z min = 0) » |
+| B3 écran/arrière-plan hors du slicing | 🟡 | `KeepAwake` dans `slice()` (typecheck) |
+| B4 `current_print` pendant l'annulation | ✅ (analyse) 🟡 (exécution de l'annulation) | garde RAII ; ASan/UBSan sur notre code sans erreur |
+| B5 sélection non persistée | 🟡 | `didSet` + restauration en deux temps (typecheck) |
+| B6 filament d'une autre imprimante | ✅ | le moteur remplace les presets incompatibles ; l'app filtre par variante de buse (tests Swift sur la sortie réelle du moteur) |
+| B7 options imposées | ✅ | modèle « valeurs forcées » : 8 tests Swift, dont l'état hérité d'une ancienne version |
+| B8 vignettes | ✅ moteur · 🟡 rendu SceneKit | gate : le moteur écrit 272×272 et 96×96 depuis le fournisseur de l'hôte, orientation vérifiée |
+| B9 `onOpenURL` | 🟡 | |
+| B10 normales / ombrage | 🟡 | |
+| B11 troncature de l'aperçu à 2 000 couches | ✅ | plus de plafond de couches ; au-delà de 1,5 M segments le remplissage interne est omis *et le dit* |
+| B12 ré-organisation à chaque slicing | ✅ | la scène conserve les positions ; placement à la « première place libre » |
+| B13 légende des gestes | 🟡 | |
+| B14 progression non ordonnée | 🟡 | relais à 10 Hz, dernière valeur seulement |
+
+**Correction de l'audit.** J'ai écrit que le sélecteur de filaments listait 858 entrées. C'est le nombre de
+*sections* du bundle ; pour une imprimante donnée il y a ~43 filaments distincts (le moteur liste toutes les
+variantes de buse du modèle, l'app ne garde que celles de l'imprimante choisie).
+
+| Phase | État |
+|---|---|
+| 0 correctifs | cf. tableau ci-dessus |
+| 1 ABI scène/presets/slicing incrémental | ✅ 24 nouvelles fonctions C, gate de scène (84 vérifications) verte sur le vrai moteur et le vrai bundle ; `PresetBundle` remplace la résolution Swift ; `Print` conservé entre slicings |
+| 2 plateau et manipulation | ✅ logique (rayons, caméra, aimantation, poser sur une face, hors-plateau : tests Linux + moteur) · 🟡 vue SceneKit, gestes, inspecteur. Fait : plateau + volume + socle QIDI, sélection, glisser, rotation à deux doigts, caméra, champs numériques, copies, organiser, centrer, orientation d'origine, annuler/rétablir, conversion d'unités, clavier. **Pas fait** : menu contextuel par appui long (remplacé par la barre d'actions), « tout sélectionner », coupe, simplification de maillage |
+| 3 aperçu G-code | ✅ construction de la géométrie (tests) · 🟡 rendu : rubans à la largeur/hauteur réelles, 7 modes de couleur, légende (durée, %), masquage par type, déplacements, double curseur de couches, curseur de mouvements, lecture |
+| 4 réglages | ✅ schéma du moteur + disposition des onglets de `Tab.cpp` (306 options, 19 pages, **toutes présentes dans le schéma**) + 1 433 traductions du bureau, Simple/Avancé/Expert, recherche · 🟡 vues. Fait : modifié/retour au preset, paramètres fréquents, préréglages nommés, export `.ini`. **Pas fait** : réglages par objet et modificateurs, enregistrer sous *héritant* d'un preset (les préréglages sont des jeux de surcharges) |
+| 5 spécificités QIDI | ✅ vignettes (moteur) · ✅ calibration Pressure Advance (tour) et débit (grossier/fin) vérifiées par la gate · 🟡 Moonraker : envoi en flux avec progression, état et températures (logique testée ; réseau non exercé). **Pas fait** : calibration vitesse volumétrique (couches par plage), PA ligne/motif, QIDI Box (multi-filament), découverte réseau |
+| 6 qualité continue | ✅ 47 tests Swift sous Linux (décodage de sorties **réelles** du moteur), typecheck du modèle et du pont C, gate de scène, job CI `swift-tests` (sans minutes macOS), banc Linux du moteur |
+
+**Anomalies amont observées (non corrigées, sans effet sur les résultats)** : le bundle QIDI met
+`extruder_clearance_*` dans des presets d'impression (le moteur les retire en journalisant une erreur par
+preset) ; la macro `TIMELAPSE_TAKE_FRAME` est lue comme un changement d'outil par `GCodeProcessor`
+(une erreur journalisée par couche) ; un `assert` de `Wipe.cpp` échoue dans une build avec assertions
+(désactivées en Release, comme sur les builds livrées).
+
+---
+
 ## 0. Méthode et référence « vraie app »
 
 - **Code de l'app lu en entier** : ABI C (`core/`), Swift (`ios/QSlicerPad/**`), scripts, CI, docs.

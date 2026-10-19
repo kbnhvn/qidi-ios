@@ -124,3 +124,39 @@ suffixes `@<imprimante>` ; `Q2 0.4 nozzle` → 94 clés, `0.12mm Extra High @Q2 
 - **Réseau** : Swift `URLSession` (Moonraker). C'est l'option « réécrire les appels réseau en Swift »
   de la roadmap : elle évite de porter OpenSSL 1.1.0l et libcurl, et laisse la place à `WKWebView`
   si la connexion cloud QIDI est reprise un jour.
+
+### 11. ABI v3 : une session « scène » (plateau, presets du moteur, slicing incrémental)
+
+L'ABI v1/v2 prenait un fichier et rendait un G-code : rien ne survivait à l'appel, donc pas de plateau
+manipulable, pas de re-slicing rapide, pas de statistiques. La v3 (`core/src/scene.cpp`) garde en mémoire
+dans `qsid_ctx` :
+
+| État | Classe libslic3r | Ce que ça permet |
+|---|---|---|
+| objets du plateau | `Model` / `ModelObject` / `ModelInstance` | déplacer, tourner, copier, poser sur une face, organiser, un maillage par objet |
+| presets | `PresetBundle` (`load_configbundle`, `update_compatible`) | mêmes héritages et mêmes conditions de compatibilité que le bureau (remplace la résolution Swift) |
+| réglages forcés | `DynamicPrintConfig::set_deserialize` | validation par la définition de l'option ; une valeur égale au preset retire la surcharge |
+| dernier slicing | `Print` conservé | `Print::apply` n'invalide que les étapes touchées ; résumé et mouvements du `GCodeProcessorResult` |
+
+Conventions : sorties JSON (UTF-8) allouées par la bibliothèque et libérées par `qsid_free`, tampons
+binaires pour les maillages (`float*`) et les mouvements (`qsid_move*`), mutations refusées pendant un slicing
+(`QSID_ERR_BUSY`), appels sérialisés par une file côté Swift (`SlicerModel.onEngine`).
+
+Le schéma des options (`qsid_config_schema`) est celui de `PrintConfigDef` (type, libellé, aide, bornes,
+énumérations, mode). La **disposition** (onglets, pages, groupes) n'existe que dans le code wxWidgets
+(`Tab.cpp`) : `scripts/gen-config-ui.py` l'extrait en JSON versionné, avec les traductions françaises du
+bureau ; un test vérifie que chacune des 306 options placées existe dans le schéma du moteur.
+
+Vérification : `core/gate/scene_gate.cpp` exerce chaque famille d'appels contre le vrai bundle QIDI
+(`scripts/gate.sh` sur macOS, `scripts/linux-engine.sh gate` sous Linux) ; les sorties réelles sont
+capturées dans `ios/QSlicerKit/Tests/QSlicerKitTests/Fixtures/engine/` et décodées par les tests Swift.
+
+### 12. Découpage de l'app : logique pure testable / colle d'interface
+
+| Couche | Contenu | Où c'est vérifié |
+|---|---|---|
+| `Core/*.swift` (Foundation seul) | géométrie du plateau et caméra, maillage du G-code, options, catalogue des réglages, filaments, calibration, Moonraker, types JSON | `ios/QSlicerKit` : `swift test` sous Linux (47 tests) |
+| `QSlicerCore` + `SlicerModel` | pont C, file série du moteur, état | `scripts/typecheck-swift.sh` : types avec le vrai en-tête C |
+| `Screens/*.swift`, `BedSceneView`, `GCodeSceneView`, `ThumbnailRenderer` | SwiftUI / SceneKit / UIKit | analyse syntaxique sous Linux ; compilation par la CI `ios-app` ; recette iPad |
+
+Le paquet `QSlicerKit` ne duplique rien : ses sources sont des liens symboliques vers `ios/QSlicerPad/Core`.

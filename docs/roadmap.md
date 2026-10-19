@@ -63,6 +63,22 @@ dépendance externe.
 - [x] ✅ localisation FR/EN (dictionnaire `L10n`, sélecteur de langue ; les messages d'erreur
   techniques restent dans la langue du système)
 
+## v1.2 — plateau, aperçu, réglages (voir `audit-ui-slicing.md`)
+
+- [x] ✅ ABI v3 : session « scène », presets du moteur, réglages forcés validés, slicing incrémental,
+  mouvements du G-code, vignettes fournies par l'hôte — **gate de scène verte** (84 vérifications) sur le
+  vrai moteur et le vrai bundle QIDI (banc Linux ; la CI macOS l'exécute dans `host-gate`)
+- [x] ✅ correctifs de l'audit : `ensure_on_bed` (cubes décalés en Z = G-code identique), annulation sûre,
+  filament cohérent avec l'imprimante, options « valeurs forcées »
+- [x] 🟡 plateau 3D (volume + socle QIDI), sélection, glisser, rotation, caméra, champs numériques, copies,
+  organiser, poser sur une face, annuler/rétablir, clavier
+- [x] 🟡 aperçu G-code en rubans, 7 modes de couleur, légende, double curseur, curseur de mouvements, lecture
+- [x] 🟡 tous les réglages (306 options, Simple/Avancé/Expert, recherche, français), préréglages nommés, export `.ini`
+- [x] ✅/🟡 calibration Pressure Advance (tour) et débit ; Moonraker en flux avec progression et état
+- [ ] ⛔ réglages par objet / modificateurs, coupe, simplification, QIDI Box, calibration vitesse volumétrique,
+  découverte réseau des imprimantes
+- [ ] 🟡 tout ce qui est 🟡 ci-dessus reste à **compiler (CI `ios-app`) et à passer en recette** sur iPad
+
 ## v2 — ce qui manque pour être « une app »
 
 - [x] ✅ **progression et annulation** : l'ABI expose `qsid_slice_async` (API objet libslic3r :
