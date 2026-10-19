@@ -751,7 +751,9 @@ final class SlicerModel: ObservableObject {
                     let summary = try core.sliceScene(output: outputURL) { percent, text in
                         relay.push(percent: Int(percent), text: text)
                     }
-                    return (summary, try core.gcodeMoves().map(GCodeMove.init))
+                    let moves = try core.gcodeMoves().map(GCodeMove.init)
+                    core.releaseResult()   // les mouvements sont chez nous : le moteur les libère
+                    return (summary, moves)
                 }
                 relay.stop()
                 let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path)

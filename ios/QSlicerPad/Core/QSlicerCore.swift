@@ -329,6 +329,12 @@ final class SlicerCore {
         }, user)
     }
 
+    /// Libère les mouvements conservés par le moteur (à appeler une fois `gcodeMoves()` lu).
+    func releaseResult() {
+        guard let context else { return }
+        qsid_release_result(context)
+    }
+
     /// Mouvements du dernier slicing.
     func gcodeMoves() throws -> [qsid_move] {
         guard let context else { throw SlicerCoreError.unavailable }

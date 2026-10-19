@@ -1090,6 +1090,14 @@ int qsid_gcode_moves(qsid_ctx *ctx, qsid_move **moves, size_t *count)
     return QSID_OK;
 }
 
+void qsid_release_result(qsid_ctx *ctx)
+{
+    if (!ctx || ctx->slicing.load())
+        return;
+    ctx->last_result = Slic3r::GCodeProcessorResult();   // libère le vecteur de mouvements
+    ctx->has_result = false;
+}
+
 void qsid_set_thumbnail_provider(qsid_ctx *ctx, qsid_thumbnail_cb cb, void *user)
 {
     if (!ctx)

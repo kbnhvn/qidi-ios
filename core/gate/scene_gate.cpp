@@ -270,6 +270,11 @@ int main(int argc, char **argv)
     check(extrude > 500, "mouvements d'extrusion", std::to_string(extrude));
     check(near1 > 100, "l'objet 1 est imprimé là où on l'a déplacé", std::to_string(near1));
     qsid_free(moves);
+    qsid_release_result(ctx);
+    qsid_move *none = nullptr;
+    size_t nnone = 99;
+    check(qsid_gcode_moves(ctx, &none, &nnone) == QSID_OK && nnone == 0 && none == nullptr,
+          "mouvements libérés par qsid_release_result");
 
     std::printf("re-slicing après changement de réglage\n");
     check(qsid_config_set(ctx, "fill_density", "40%", err, sizeof(err)) == QSID_OK, "fill_density=40%");

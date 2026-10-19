@@ -241,6 +241,10 @@ typedef struct qsid_move {
 /* Mouvements du dernier slicing (copie). Libérer avec qsid_free(). */
 QSID_EXPORT int qsid_gcode_moves(qsid_ctx *ctx, qsid_move **moves, size_t *count);
 
+/* Libère les mouvements conservés du dernier slicing (plusieurs centaines de Mo pour un gros
+ * fichier) : à appeler une fois qsid_gcode_moves() consommé. Le G-code reste sur disque. */
+QSID_EXPORT void qsid_release_result(qsid_ctx *ctx);
+
 /* Vignettes : fournies par l'hôte. Remplit `rgba` (largeur*hauteur*4, lignes de
  * haut en bas) et retourne 1, ou 0 si indisponible. */
 typedef int (*qsid_thumbnail_cb)(int width, int height, uint8_t *rgba, void *user);
