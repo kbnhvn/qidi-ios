@@ -33,6 +33,29 @@ struct SceneInstance: Decodable, Equatable {
     var size: [Double] { zip(max, min).map { $0 - $1 } }
 }
 
+/// Volume d'un objet : pièce du modèle, ou modificateur / bloqueur / forceur de supports.
+struct SceneVolume: Decodable, Equatable, Identifiable {
+    let id: UInt64
+    var name: String
+    /// "part" | "modifier" | "blocker" | "enforcer"
+    var kind: String
+    /// Position et dimensions dans le repère local de l'objet (mm).
+    var offset: [Double]
+    var size: [Double]
+    var triangles: Int
+    var config: [String: String]
+
+    var isModifier: Bool { kind != "part" }
+}
+
+/// Plage de hauteurs [min, max] (mm) avec ses propres réglages.
+struct SceneLayerRange: Decodable, Equatable, Identifiable {
+    var min: Double
+    var max: Double
+    var config: [String: String]
+    var id: String { "\(min)-\(max)" }
+}
+
 struct SceneObject: Decodable, Equatable, Identifiable {
     let id: UInt64
     var name: String
@@ -40,8 +63,37 @@ struct SceneObject: Decodable, Equatable, Identifiable {
     var localMin: [Double]
     var localMax: [Double]
     var instances: [SceneInstance]
+    /// Réglages propres à l'objet (par-dessus le preset).
+    var config: [String: String] = [:]
+    var volumes: [SceneVolume] = []
+    var layerRanges: [SceneLayerRange] = []
 
     var localSize: [Double] { zip(localMax, localMin).map { $0 - $1 } }
+    var modifiers: [SceneVolume] { volumes.filter(\.isModifier) }
+    /// Vrai si l'objet porte au moins un réglage, modificateur ou plage de couches.
+    var hasCustomSettings: Bool { !config.isEmpty || !modifiers.isEmpty || !layerRanges.isEmpty }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, triangles, localMin, localMax, instances, config, volumes, layerRanges
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UInt64.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        triangles = try c.decode(Int.self, forKey: .triangles)
+        localMin = try c.decode([Double].self, forKey: .localMin)
+        localMax = try c.decode([Double].self, forKey: .localMax)
+        instances = try c.decode([SceneInstance].self, forKey: .instances)
+        config = try c.decodeIfPresent([String: String].self, forKey: .config) ?? [:]
+        volumes = try c.decodeIfPresent([SceneVolume].self, forKey: .volumes) ?? []
+        layerRanges = try c.decodeIfPresent([SceneLayerRange].self, forKey: .layerRanges) ?? []
+    }
+
+    init(id: UInt64, name: String, triangles: Int, localMin: [Double], localMax: [Double], instances: [SceneInstance]) {
+        self.id = id; self.name = name; self.triangles = triangles
+        self.localMin = localMin; self.localMax = localMax; self.instances = instances
+    }
 }
 
 struct SceneInfo: Decodable, Equatable {
@@ -61,6 +113,17 @@ struct SceneAlerts: Decodable, Equatable {
     var imperial: Bool
 
     var isEmpty: Bool { deletedObjects == 0 && !multipart && !savedInMeters && !imperial }
+}
+
+/// Résultat d'une coupe : identifiants des objets créés.
+struct SceneCutResult: Decodable, Equatable {
+    var objects: [UInt64]
+}
+
+/// Résultat d'une simplification de maillage.
+struct SceneSimplifyResult: Decodable, Equatable {
+    var before: Int
+    var after: Int
 }
 
 struct SceneAddResult: Decodable, Equatable {

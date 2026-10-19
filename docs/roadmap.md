@@ -66,7 +66,7 @@ dépendance externe.
 ## v1.2 — plateau, aperçu, réglages (voir `audit-ui-slicing.md`)
 
 - [x] ✅ ABI v3 : session « scène », presets du moteur, réglages forcés validés, slicing incrémental,
-  mouvements du G-code, vignettes fournies par l'hôte — **gate de scène verte** (90 vérifications) sur le
+  mouvements du G-code, vignettes fournies par l'hôte — **gate de scène verte** (163 vérifications) sur le
   vrai moteur et le vrai bundle QIDI (banc Linux ; la CI macOS l'exécute dans `host-gate`)
 - [x] ✅ correctifs de l'audit : `ensure_on_bed` (cubes décalés en Z = G-code identique), annulation sûre,
   filament cohérent avec l'imprimante, options « valeurs forcées »
@@ -75,8 +75,13 @@ dépendance externe.
 - [x] 🟡 aperçu G-code en rubans, 7 modes de couleur, légende, double curseur, curseur de mouvements, lecture
 - [x] 🟡 tous les réglages (306 options, Simple/Avancé/Expert, recherche, français), préréglages nommés, export `.ini`
 - [x] ✅/🟡 calibration Pressure Advance (tour) et débit ; Moonraker en flux avec progression et état
-- [ ] ⛔ réglages par objet / modificateurs, coupe, simplification, QIDI Box, calibration vitesse volumétrique,
-  découverte réseau des imprimantes
+- [x] ✅ réglages par objet, modificateurs (boîte / cylindre / sphère, bloqueurs et forceurs de supports), plages de
+  hauteurs, coupe par plan, simplification de maillage, sélection multiple, menu contextuel : moteur et modèle
+  exécutés (gate + test de bout en bout) · 🟡 vues
+- [x] ✅/🟡 calibrations Pressure Advance ligne / motif et débit volumétrique maximal ; multi-filament (1–16 extrudeurs)
+  et commandes QIDI Box ; découverte des imprimantes (balayage + Bonjour) ; préréglages qui héritent des presets
+- [ ] ⛔ lecture automatique du contenu du QIDI Box (couleur, matière) : module réseau fermé du bureau, non porté ;
+  numéros d'emplacement à confirmer sur le matériel
 - [ ] 🟡 tout ce qui est 🟡 ci-dessus reste à **compiler (CI `ios-app`) et à passer en recette** sur iPad
 
 ## v2 — ce qui manque pour être « une app »

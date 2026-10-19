@@ -41,8 +41,11 @@ struct ConfigOption: Decodable, Identifiable, Equatable {
     let enumValues: [String]?
     let enumLabels: [String]?
     let `default`: String?
+    /// Réglable par objet / modificateur / plage de couches (absent des anciens schémas).
+    let perObject: Bool?
 
     var id: String { key }
+    var isPerObject: Bool { perObject ?? false }
 
     var isVector: Bool {
         ["floats", "ints", "strings", "percents", "floats_or_percents", "points", "enums", "bools"].contains(type)

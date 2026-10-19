@@ -72,6 +72,16 @@ final class SlicerModel: ObservableObject {
         var scale: [Double]
     }
 
+    /// Changement de transformation demandé pour une instance.
+    struct TransformChange {
+        var objectID: UInt64
+        var instance = 0
+        var offset: [Double]?
+        var rotationDeg: [Double]?
+        var scale: [Double]?
+        var dropToBed = false
+    }
+
     // MARK: Presets (moteur)
 
     @Published private(set) var printers: [String] = []
@@ -96,7 +106,40 @@ final class SlicerModel: ObservableObject {
     // MARK: Scène
 
     @Published private(set) var scene: SceneInfo?
-    @Published var selectedObjectID: UInt64?
+    /// Objet principal de la sélection (celui que l'inspecteur détaille). Lui affecter un objet
+    /// remplace la sélection par cet objet seul ; nil désélectionne tout.
+    var selectedObjectID: UInt64? {
+        get { primaryObjectID }
+        set {
+            if let id = newValue {
+                selectedObjectIDs = [id]
+                primaryObjectID = id
+            } else {
+                selectedObjectIDs = []
+                primaryObjectID = nil
+            }
+        }
+    }
+    @Published private(set) var primaryObjectID: UInt64?
+    /// Tous les objets sélectionnés (multi-sélection : ⌘A, mode « Sélection multiple »).
+    @Published private(set) var selectedObjectIDs: Set<UInt64> = []
+    /// Plan de coupe en cours d'édition (affiché sur le plateau).
+    @Published var cutPlane: CutPlane?
+    /// Mode « sélection multiple » : un toucher ajoute / retire l'objet de la sélection.
+    @Published var multiSelectMode = false
+    /// Outil ouvert dans une feuille (simplification, réglages de l'objet).
+    @Published var activeTool: ObjectTool?
+
+    enum ObjectTool: Identifiable, Equatable {
+        case simplify(UInt64)
+        case settings(UInt64)
+        var id: String {
+            switch self {
+            case .simplify(let i): return "simplify-\(i)"
+            case .settings(let i): return "settings-\(i)"
+            }
+        }
+    }
     /// Triangles locaux (9 floats chacun) par objet.
     @Published private(set) var meshes: [UInt64: [Float]] = [:]
     @Published private(set) var sceneAlerts: SceneAlerts?
@@ -108,17 +151,25 @@ final class SlicerModel: ObservableObject {
     // MARK: Calibration
 
     @Published private(set) var calibration: CalibrationKind?
+    /// Aide à la lecture de la calibration en cours (valeur de chaque ligne, formule…).
+    @Published private(set) var calibrationLegend: [String] = []
     private var overridesBeforeCalibration: SliceOverrides?
 
     /// Prépare une impression de calibration : vide le plateau, charge le modèle fourni,
-    /// applique les réglages temporaires. `endCalibration()` restaure tout.
+    /// applique les réglages temporaires, les dimensions et les plages de hauteurs.
+    /// `endCalibration()` restaure tout.
     func startCalibration(_ kind: CalibrationKind) {
         errorMessage = nil
         let height = Double(baseConfig["max_print_height"] ?? "") ?? 250
+        let bed = scene?.bed
+        let center: [Double] = bed.map { b -> [Double] in [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2] } ?? [135, 135]
+        let size: [Double] = bed.map { b -> [Double] in [b.width, b.depth] } ?? [270, 270]
+        // configuration effective : preset + réglages de l'utilisateur
+        var effective = baseConfig
+        for (key, value) in overrides.configEntries(basedOn: baseConfig) { effective[key] = value }
         let plan: CalibrationPlan
         do {
-            let effective = Dictionary(uniqueKeysWithValues: ["start_gcode", "before_layer_gcode"].map { ($0, value(of: $0) ?? "") })
-            plan = try Calibration.plan(for: kind, base: effective, maxPrintHeight: height)
+            plan = try Calibration.plan(for: kind, base: effective, maxPrintHeight: height, bedCenter: center, bedSize: size)
         } catch {
             errorMessage = "Calibration impossible : \(error)"
             return
@@ -134,15 +185,26 @@ final class SlicerModel: ObservableObject {
                 meshes.removeAll()
                 if overridesBeforeCalibration == nil { overridesBeforeCalibration = overrides }
                 for (key, value) in plan.overrides { overrides.set(key, value, base: baseConfig) }
+                await overridesSyncTask?.value   // les réglages temporaires doivent être dans le moteur avant la suite
                 let added = try await onEngine { try $0.addToScene(url) }
                 await refreshScene()
-                if let target = plan.targetHeight,
-                   let id = added.added.first,
-                   let object = scene?.objects.first(where: { $0.id == id }),
-                   object.localSize[2] > 1e-6 {
-                    transform(objectID: id, scale: [1, 1, target / object.localSize[2]], dropToBed: true, recordUndo: false)
+                if let id = added.added.first, let object = scene?.objects.first(where: { $0.id == id }),
+                   let instance = object.instances.first {
+                    try await shapeCalibrationObject(object, instance: instance, plan: plan)
                 }
+                if let id = added.added.first {
+                    let ranges = plan.layerRanges
+                    if !ranges.isEmpty {
+                        try await onEngine { core in
+                            for r in ranges {
+                                try core.setLayerRange(objectID: id, minZ: r.minZ, maxZ: r.maxZ, key: r.key, value: r.value)
+                            }
+                        }
+                    }
+                }
+                await refreshScene()
                 calibration = kind
+                calibrationLegend = plan.legend
                 selectedObjectID = nil
                 output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []
                 workspace = .prepare
@@ -153,11 +215,33 @@ final class SlicerModel: ObservableObject {
         }
     }
 
+    /// Met le modèle de calibration aux dimensions et à la position demandées par le plan.
+    private func shapeCalibrationObject(_ object: SceneObject, instance: SceneInstance, plan: CalibrationPlan) async throws {
+        var wanted: [Double?] = plan.targetSize ?? [nil, nil, nil]
+        if let height = plan.targetHeight { wanted[2] = height }
+        let local = object.localSize
+        var scale = instance.scale
+        for axis in 0..<3 {
+            if let target = wanted[axis], local[axis] > 1e-6 { scale[axis] = target / local[axis] }
+        }
+        var offset = instance.offset
+        if let position = plan.position {
+            for axis in 0..<2 { if let p = position[axis] { offset[axis] = p } }
+        }
+        let id = object.id
+        let newScale = scale, newOffset = offset
+        try await onEngine {
+            try $0.setTransform(objectID: id, offset: newOffset, scale: newScale, dropToBed: true)
+        }
+        await refreshScene()
+    }
+
     /// Quitte la calibration : réglages d'origine restaurés, plateau vidé.
     func endCalibration() {
         if let saved = overridesBeforeCalibration { overrides = saved }
         overridesBeforeCalibration = nil
         calibration = nil
+        calibrationLegend = []
         clearScene()
     }
 
@@ -184,33 +268,68 @@ final class SlicerModel: ObservableObject {
         }
     }
 
-    // MARK: Préréglages utilisateur (jeux de réglages nommés)
+    // MARK: Préréglages utilisateur (héritent de presets système)
 
-    @Published private(set) var userPresets: [String: SliceOverrides] = {
-        guard let data = UserDefaults.standard.data(forKey: "qsid.userPresets"),
-              let saved = try? JSONDecoder().decode([String: SliceOverrides].self, from: data) else { return [:] }
-        return saved
+    @Published private(set) var userPresets: [String: UserPreset] = {
+        guard let data = UserDefaults.standard.data(forKey: "qsid.userPresets") else { return [:] }
+        return UserPresetStore.decode(data)
     }()
+    /// Préréglage appliqué en dernier (sert à signaler qu'il a été modifié depuis).
+    @Published private(set) var activeUserPreset: String?
 
-    /// Enregistre les réglages actuels sous `name` (remplace un préréglage du même nom).
-    func saveUserPreset(named name: String) {
-        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, !overrides.isEmpty else { return }
-        userPresets[clean] = overrides
+    /// Enregistre l'état actuel (presets parents + réglages) sous `name`. Un nom déjà pris est
+    /// remplacé si `replacing`, sinon un numéro est ajouté (« enregistrer sous »).
+    @discardableResult
+    func saveUserPreset(named name: String, replacing: Bool = true) -> String? {
+        let existing = Set(userPresets.keys)
+        let clean = replacing ? name.trimmingCharacters(in: .whitespacesAndNewlines)
+                              : UserPresetStore.uniqueName(name, existing: existing)
+        guard !clean.isEmpty else { return nil }
+        // un profil .ini importé n'est pas un preset système : pas de parents à mémoriser
+        let parents = importedProfile == nil ? selection : SlicerCore.PresetSelection(printer: "", print: "", filament: "")
+        userPresets[clean] = UserPreset(name: clean, printer: parents.printer, print: parents.print,
+                                        filament: parents.filament, overrides: overrides)
+        activeUserPreset = clean
         persistUserPresets()
+        return clean
     }
 
+    /// Rétablit les presets parents puis les réglages du préréglage.
     func applyUserPreset(_ name: String) {
-        if let preset = userPresets[name] { overrides = preset }
+        guard let preset = userPresets[name] else { return }
+        Task {
+            if preset.hasParents {
+                await applySelection(printer: preset.printer.isEmpty ? nil : preset.printer,
+                                     print: preset.print.isEmpty ? nil : preset.print,
+                                     filament: preset.filament.isEmpty ? nil : preset.filament)
+            }
+            overrides = preset.overrides
+            activeUserPreset = name
+        }
+    }
+
+    /// Vrai si l'état actuel diffère du préréglage actif (réglages ou presets parents).
+    var isUserPresetModified: Bool {
+        guard let name = activeUserPreset, let preset = userPresets[name] else { return false }
+        if overrides != preset.overrides { return true }
+        guard preset.hasParents, importedProfile == nil else { return false }
+        return selection.printer != preset.printer || selection.print != preset.print || selection.filament != preset.filament
+    }
+
+    /// Remplace le préréglage actif par l'état actuel.
+    func updateActiveUserPreset() {
+        guard let name = activeUserPreset else { return }
+        saveUserPreset(named: name)
     }
 
     func deleteUserPreset(_ name: String) {
         userPresets[name] = nil
+        if activeUserPreset == name { activeUserPreset = nil }
         persistUserPresets()
     }
 
     private func persistUserPresets() {
-        guard let data = try? JSONEncoder().encode(userPresets) else { return }
+        guard let data = UserPresetStore.encode(userPresets) else { return }
         UserDefaults.standard.set(data, forKey: "qsid.userPresets")
     }
 
@@ -235,6 +354,8 @@ final class SlicerModel: ObservableObject {
     @Published private(set) var output: SliceOutput?
     @Published private(set) var summary: SliceSummary?
     @Published private(set) var gcodeMesh: GCodeMesh?
+    /// Extrudeurs (outils) réellement utilisés par le G-code, de 0 à n-1.
+    @Published private(set) var usedExtruders: [Int] = []
     /// Incrémenté à chaque nouvelle géométrie d'aperçu (même nombre de couches ≠ même contenu :
     /// changement de couleur, types masqués…) ; la vue 3D se reconstruit sur ce compteur.
     @Published private(set) var gcodeMeshGeneration = 0
@@ -287,8 +408,9 @@ final class SlicerModel: ObservableObject {
     private var core: SlicerCore?
     private let engineQueue = DispatchQueue(label: "qsid.engine", qos: .userInitiated)
     private var gcodeMoves: [GCodeMove] = []
-    private var undoStack: [TransformSnapshot] = []
-    private var redoStack: [TransformSnapshot] = []
+    /// Chaque entrée est un groupe : un geste sur plusieurs objets s'annule en une fois.
+    private var undoStack: [[TransformSnapshot]] = []
+    private var redoStack: [[TransformSnapshot]] = []
     private var overridesSyncTask: Task<Void, Never>?
     private var rebuildTask: Task<Void, Never>?
     private var isRestoring = false
@@ -299,6 +421,7 @@ final class SlicerModel: ObservableObject {
         static let filament = "qsid.filament"
         static let moonraker = "qsid.moonraker"
         static let overrides = "qsid.overrides.v2"
+        static let extruders = "qsid.extruders"
     }
 
     // MARK: Cycle de vie
@@ -356,6 +479,7 @@ final class SlicerModel: ObservableObject {
         }
         isRestoring = false
         presetsReady = true
+        await restoreExtruders()
         await refreshScene()
     }
 
@@ -392,6 +516,14 @@ final class SlicerModel: ObservableObject {
             let chosen = try await onEngine { try $0.selectPresets(printer: printer, print: print, filament: filament) }
             selection = chosen
             persistSelection()
+            if isMultiFilament {
+                // le moteur a réappliqué les extrudeurs : on relit les filaments retenus
+                let names = extruderFilaments
+                if let setup = try? await onEngine({ try $0.setExtruders(count: names.count, filaments: names) }) {
+                    extruderFilaments = setup.count > 1 ? setup.filaments : []
+                    persistExtruders()
+                }
+            }
             await refreshPresetLists()
             await syncOverrides()
             await refreshScene()
@@ -587,7 +719,10 @@ final class SlicerModel: ObservableObject {
             let live = Set(info.objects.map(\.id))
             for id in meshes.keys where !live.contains(id) { meshes[id] = nil }
             scene = info
-            if let selected = selectedObjectID, !live.contains(selected) { selectedObjectID = nil }
+            let kept = selectedObjectIDs.intersection(live)
+            if kept != selectedObjectIDs { selectedObjectIDs = kept }
+            if let selected = primaryObjectID, !live.contains(selected) { primaryObjectID = kept.first }
+            if let plane = cutPlane, !live.contains(plane.objectID) { cutPlane = nil }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -600,6 +735,38 @@ final class SlicerModel: ObservableObject {
         return scene?.objects.first { $0.id == id }
     }
 
+    /// Tous les objets sélectionnés, dans l'ordre de la scène.
+    var selectedObjects: [SceneObject] {
+        scene?.objects.filter { selectedObjectIDs.contains($0.id) } ?? []
+    }
+
+    var hasMultipleSelected: Bool { selectedObjectIDs.count > 1 }
+
+    // MARK: Sélection multiple
+
+    func isSelected(_ id: UInt64) -> Bool { selectedObjectIDs.contains(id) }
+
+    /// Ajoute l'objet à la sélection, ou l'en retire s'il y est déjà (toucher avec « Ajouter »).
+    func toggleSelection(_ id: UInt64) {
+        guard scene?.objects.contains(where: { $0.id == id }) == true else { return }
+        if selectedObjectIDs.contains(id) {
+            selectedObjectIDs.remove(id)
+            if primaryObjectID == id { primaryObjectID = selectedObjectIDs.first }
+        } else {
+            selectedObjectIDs.insert(id)
+            primaryObjectID = id
+        }
+    }
+
+    /// ⌘A : tous les objets du plateau.
+    func selectAll() {
+        guard let objects = scene?.objects, !objects.isEmpty else { return }
+        selectedObjectIDs = Set(objects.map(\.id))
+        if primaryObjectID == nil || !selectedObjectIDs.contains(primaryObjectID!) { primaryObjectID = objects.first?.id }
+    }
+
+    func clearSelection() { selectedObjectID = nil }
+
     private func snapshot(of object: SceneObject, instance: Int = 0) -> TransformSnapshot? {
         guard instance < object.instances.count else { return nil }
         let i = object.instances[instance]
@@ -611,15 +778,27 @@ final class SlicerModel: ObservableObject {
     func transform(objectID: UInt64, instance: Int = 0,
                    offset: [Double]? = nil, rotationDeg: [Double]? = nil, scale: [Double]? = nil,
                    dropToBed: Bool = false, recordUndo: Bool = true) {
-        guard let object = scene?.objects.first(where: { $0.id == objectID }) else { return }
-        let before = snapshot(of: object, instance: instance)
+        applyTransforms([TransformChange(objectID: objectID, instance: instance, offset: offset,
+                                         rotationDeg: rotationDeg, scale: scale, dropToBed: dropToBed)],
+                        recordUndo: recordUndo)
+    }
+
+    /// Applique plusieurs transformations d'un coup (un seul pas d'annulation).
+    func applyTransforms(_ changes: [TransformChange], recordUndo: Bool = true) {
+        guard let objects = scene?.objects else { return }
+        let before = changes.compactMap { change in
+            objects.first(where: { $0.id == change.objectID }).flatMap { snapshot(of: $0, instance: change.instance) }
+        }
+        guard !before.isEmpty else { return }
         Task {
             do {
-                try await onEngine {
-                    try $0.setTransform(objectID: objectID, instance: instance, offset: offset,
-                                        rotationDeg: rotationDeg, scale: scale, dropToBed: dropToBed)
+                try await onEngine { core in
+                    for c in changes {
+                        try core.setTransform(objectID: c.objectID, instance: c.instance, offset: c.offset,
+                                              rotationDeg: c.rotationDeg, scale: c.scale, dropToBed: c.dropToBed)
+                    }
                 }
-                if recordUndo, let before {
+                if recordUndo {
                     undoStack.append(before)
                     if undoStack.count > 100 { undoStack.removeFirst() }
                     redoStack.removeAll()
@@ -635,15 +814,15 @@ final class SlicerModel: ObservableObject {
     }
 
     func undo() {
-        guard let snap = undoStack.popLast() else { updateUndoFlags(); return }
-        if let current = currentSnapshot(matching: snap) { redoStack.append(current) }
-        restore(snap)
+        guard let group = undoStack.popLast() else { updateUndoFlags(); return }
+        redoStack.append(group.compactMap(currentSnapshot(matching:)))
+        restore(group)
     }
 
     func redo() {
-        guard let snap = redoStack.popLast() else { updateUndoFlags(); return }
-        if let current = currentSnapshot(matching: snap) { undoStack.append(current) }
-        restore(snap)
+        guard let group = redoStack.popLast() else { updateUndoFlags(); return }
+        undoStack.append(group.compactMap(currentSnapshot(matching:)))
+        restore(group)
     }
 
     /// État actuel de l'instance visée par `snap` (pour pouvoir y revenir : rétablir / annuler).
@@ -653,10 +832,12 @@ final class SlicerModel: ObservableObject {
         return snapshot(of: object, instance: snap.instance)
     }
 
-    private func restore(_ snap: TransformSnapshot) {
+    private func restore(_ group: [TransformSnapshot]) {
         updateUndoFlags()
-        transform(objectID: snap.objectID, instance: snap.instance, offset: snap.offset,
-                  rotationDeg: snap.rotationDeg, scale: snap.scale, recordUndo: false)
+        applyTransforms(group.map {
+            TransformChange(objectID: $0.objectID, instance: $0.instance, offset: $0.offset,
+                            rotationDeg: $0.rotationDeg, scale: $0.scale)
+        }, recordUndo: false)
     }
 
     private func updateUndoFlags() {
@@ -664,23 +845,46 @@ final class SlicerModel: ObservableObject {
         canRedo = !redoStack.isEmpty
     }
 
-    /// Déplacement d'un pas (flèches du clavier ; ⇧ = 10 mm), borné au plateau.
+    /// Déplacement d'un pas (flèches du clavier ; ⇧ = 10 mm), borné au plateau. Le groupe
+    /// sélectionné bouge d'un bloc.
     func nudgeSelected(dx: Double, dy: Double) {
-        guard let object = selectedObject, let inst = object.instances.first, let bed = scene?.bed else { return }
-        let shift = BedBounds.clampingShift(min: Vec3(inst.min[0] + dx, inst.min[1] + dy, inst.min[2]),
-                                            max: Vec3(inst.max[0] + dx, inst.max[1] + dy, inst.max[2]), bed: bed)
-        transform(objectID: object.id, offset: [inst.offset[0] + dx + shift.x, inst.offset[1] + dy + shift.y, inst.offset[2]])
+        let objects = selectedObjects
+        guard !objects.isEmpty, let bed = scene?.bed else { return }
+        let shift = SelectionGroup.clampedShift(of: objects, dx: dx, dy: dy, bed: bed)
+        applyTransforms(objects.compactMap { object in
+            object.instances.first.map { inst in
+                TransformChange(objectID: object.id,
+                                offset: [inst.offset[0] + shift.x, inst.offset[1] + shift.y, inst.offset[2]])
+            }
+        })
     }
 
+    /// Déplace tout le groupe sélectionné de (dx, dy) (glisser d'un objet de la sélection).
+    func moveSelection(dx: Double, dy: Double) { nudgeSelected(dx: dx, dy: dy) }
+
     func duplicateSelected() {
-        guard let object = selectedObject else { return }
-        setInstanceCount(object.instances.count + 1, objectID: object.id)
+        let objects = selectedObjects
+        guard !objects.isEmpty else { return }
+        let counts = objects.map { ($0.id, $0.instances.count + 1) }
+        mutateScene { core in for (id, count) in counts { try core.setInstanceCount(objectID: id, count: count) } }
     }
 
     func deleteSelected() {
-        guard let id = selectedObjectID else { return }
-        mutateScene { try $0.removeObject(id) }
+        let ids = Array(selectedObjectIDs)
+        guard !ids.isEmpty else { return }
+        mutateScene { core in for id in ids { try core.removeObject(id) } }
         selectedObjectID = nil
+    }
+
+    /// Pose tous les objets sélectionnés sur le plateau.
+    func dropSelectedToBed() {
+        let ids = Array(selectedObjectIDs)
+        mutateScene { core in for id in ids { try core.dropToBed(objectID: id) } }
+    }
+
+    /// Remet la rotation d'origine de tous les objets sélectionnés.
+    func resetRotationOfSelection() {
+        applyTransforms(selectedObjects.map { TransformChange(objectID: $0.id, rotationDeg: [0, 0, 0], dropToBed: true) })
     }
 
     func setInstanceCount(_ count: Int, objectID: UInt64) {
@@ -696,8 +900,155 @@ final class SlicerModel: ObservableObject {
 
     /// Conversion d'unités (pouces → mm : 25,4 ; mètres → mm : 1000).
     func scaleSelected(by factor: Double) {
-        guard let object = selectedObject, let inst = object.instances.first else { return }
-        transform(objectID: object.id, scale: inst.scale.map { $0 * factor }, dropToBed: true)
+        applyTransforms(selectedObjects.compactMap { object in
+            object.instances.first.map { TransformChange(objectID: object.id, scale: $0.scale.map { $0 * factor }, dropToBed: true) }
+        })
+    }
+
+    // MARK: Coupe
+
+    /// Ouvre l'outil de coupe sur l'objet sélectionné (plan horizontal au milieu).
+    func beginCut(axis: CutPlane.Axis = .z) {
+        guard let object = selectedObject, let plane = CutPlane.centered(on: object, axis: axis) else {
+            errorMessage = L10n.t("Cet objet est trop petit pour être coupé.")
+            return
+        }
+        cutPlane = plane
+    }
+
+    func cancelCut() { cutPlane = nil }
+
+    /// Change l'axe du plan en gardant le milieu de l'objet.
+    func setCutAxis(_ axis: CutPlane.Axis) {
+        guard let plane = cutPlane, plane.axis != axis,
+              let object = scene?.objects.first(where: { $0.id == plane.objectID }),
+              let moved = CutPlane.centered(on: object, axis: axis) else { return }
+        cutPlane = moved
+    }
+
+    /// Coupe l'objet au plan courant. Les deux moitiés (ou celle gardée) sont sélectionnées.
+    func applyCut(keep: CutPlane.Keep, placeOnCut: Bool) {
+        guard let plane = cutPlane,
+              let object = scene?.objects.first(where: { $0.id == plane.objectID }),
+              let inst = object.instances.first, plane.isValid(for: inst) else {
+            errorMessage = L10n.t("Le plan de coupe doit traverser l'objet.")
+            return
+        }
+        let point = plane.point(in: inst), normal = plane.axis.normal
+        let id = object.id
+        cutPlane = nil
+        Task {
+            do {
+                let result = try await onEngine {
+                    try $0.cut(objectID: id, point: point, normal: normal, keep: keep.rawValue, placeOnCut: placeOnCut)
+                }
+                await refreshScene()
+                selectedObjectIDs = Set(result.objects)
+                primaryObjectID = result.objects.first
+                statusLine = String(format: L10n.t("Coupe faite : %ld objet(s)."), result.objects.count)
+                markStale()
+            } catch {
+                errorMessage = L10n.t("Coupe impossible : ") + error.localizedDescription
+                errorTick += 1
+                await refreshScene()
+            }
+        }
+    }
+
+    // MARK: Simplification
+
+    /// Réduit le nombre de triangles de l'objet à `ratio` (0..1) du total.
+    func simplify(objectID: UInt64, ratio: Double) {
+        Task {
+            do {
+                let result = try await onEngine { try $0.simplify(objectID: objectID, ratio: ratio) }
+                meshes[objectID] = nil   // le maillage a changé : rechargé par refreshScene
+                await refreshScene()
+                statusLine = String(format: L10n.t("Maillage simplifié : %ld → %ld triangles."), result.before, result.after)
+                markStale()
+            } catch {
+                errorMessage = L10n.t("Simplification impossible : ") + error.localizedDescription
+                errorTick += 1
+            }
+        }
+    }
+
+    // MARK: Réglages par objet, modificateurs, plages de couches
+
+    /// Valeur d'une option pour un objet (réglage propre, sinon valeur globale effective).
+    func objectValue(of key: String, objectID: UInt64, volumeID: UInt64 = 0) -> String? {
+        guard let object = scene?.objects.first(where: { $0.id == objectID }) else { return nil }
+        let own = volumeID == 0 ? object.config[key] : object.volumes.first(where: { $0.id == volumeID })?.config[key]
+        return own ?? (volumeID == 0 ? nil : object.config[key]) ?? value(of: key)
+    }
+
+    func isObjectOptionModified(_ key: String, objectID: UInt64, volumeID: UInt64 = 0) -> Bool {
+        guard let object = scene?.objects.first(where: { $0.id == objectID }) else { return false }
+        return (volumeID == 0 ? object.config : object.volumes.first(where: { $0.id == volumeID })?.config ?? [:])[key] != nil
+    }
+
+    func setObjectOption(_ key: String, _ value: String, objectID: UInt64, volumeID: UInt64 = 0) {
+        mutateScene { try $0.setObjectConfig(objectID: objectID, volumeID: volumeID, key: key, value: value) }
+    }
+
+    func resetObjectOption(_ key: String?, objectID: UInt64, volumeID: UInt64 = 0) {
+        mutateScene { try $0.resetObjectConfig(objectID: objectID, volumeID: volumeID, key: key) }
+    }
+
+    func addModifier(objectID: UInt64, shape: ObjectSettings.ModifierShape, kind: ObjectSettings.ModifierKind) {
+        guard let inst = scene?.objects.first(where: { $0.id == objectID })?.instances.first else { return }
+        let start = ObjectSettings.defaultModifier(for: inst)
+        mutateScene {
+            try $0.addModifier(objectID: objectID, shape: shape.rawValue, kind: kind.rawValue,
+                               centerWorld: start.center, size: start.size)
+        }
+    }
+
+    func updateModifier(objectID: UInt64, volumeID: UInt64, centerWorld: [Double]?, size: [Double]?) {
+        mutateScene { try $0.setModifier(objectID: objectID, volumeID: volumeID, centerWorld: centerWorld, size: size) }
+    }
+
+    func removeModifier(objectID: UInt64, volumeID: UInt64) {
+        mutateScene { try $0.removeVolume(objectID: objectID, volumeID: volumeID) }
+    }
+
+    func addLayerRange(objectID: UInt64) {
+        guard let object = scene?.objects.first(where: { $0.id == objectID }),
+              let range = ObjectSettings.defaultLayerRange(for: object) else {
+            errorMessage = L10n.t("Plus de place pour une plage de hauteurs.")
+            return
+        }
+        let layerHeight = value(of: "layer_height")
+        mutateScene { try $0.setLayerRange(objectID: objectID, minZ: range.min, maxZ: range.max,
+                                           key: "layer_height", value: layerHeight) }
+    }
+
+    func setLayerRangeOption(objectID: UInt64, minZ: Double, maxZ: Double, key: String, value: String) {
+        mutateScene { try $0.setLayerRange(objectID: objectID, minZ: minZ, maxZ: maxZ, key: key, value: value) }
+    }
+
+    /// Change les bornes d'une plage en gardant ses réglages ; l'ancienne plage est rétablie si le moteur refuse.
+    func moveLayerRange(objectID: UInt64, from: SceneLayerRange, minZ: Double, maxZ: Double) {
+        let entries = from.config.sorted { $0.key < $1.key }
+        mutateScene { core in
+            try core.removeLayerRange(objectID: objectID, minZ: from.min, maxZ: from.max)
+            do {
+                try core.setLayerRange(objectID: objectID, minZ: minZ, maxZ: maxZ)
+                for (key, value) in entries {
+                    try core.setLayerRange(objectID: objectID, minZ: minZ, maxZ: maxZ, key: key, value: value)
+                }
+            } catch {
+                try? core.setLayerRange(objectID: objectID, minZ: from.min, maxZ: from.max)
+                for (key, value) in entries {
+                    try? core.setLayerRange(objectID: objectID, minZ: from.min, maxZ: from.max, key: key, value: value)
+                }
+                throw error
+            }
+        }
+    }
+
+    func removeLayerRange(objectID: UInt64, minZ: Double, maxZ: Double, key: String? = nil) {
+        mutateScene { try $0.removeLayerRange(objectID: objectID, minZ: minZ, maxZ: maxZ, key: key) }
     }
 
     func layOnFace(objectID: UInt64, triangle: Int) {
@@ -709,7 +1060,7 @@ final class SlicerModel: ObservableObject {
         mutateScene { try $0.clearScene() }
         selectedObjectID = nil
         meshes.removeAll()
-        output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []
+        output = nil; summary = nil; gcodeMesh = nil; gcodeMoves = []; usedExtruders = []
         gcodeMeshGeneration += 1
     }
 
@@ -791,6 +1142,7 @@ final class SlicerModel: ObservableObject {
                 let attrs = try? FileManager.default.attributesOfItem(atPath: outputURL.path)
                 summary = result.0
                 gcodeMoves = result.1
+                usedExtruders = Set(result.1.lazy.filter { $0.moveType == .extrude }.map { Int($0.extruder) }).sorted()
                 output = SliceOutput(url: outputURL, sizeBytes: (attrs?[.size] as? Int64) ?? 0,
                                      seconds: Date().timeIntervalSince(started))
                 resultIsStale = false
@@ -842,6 +1194,7 @@ final class SlicerModel: ObservableObject {
         builder.mode = colorMode
         builder.hiddenRoles = hiddenRoles
         builder.includeTravel = showTravel
+        builder.toolColors = GCodeMeshBuilder.parseColors(value(of: "filament_colour") ?? "")
         let moves = gcodeMoves
         let configured = builder   // copie immuable : capturée par la tâche détachée
         rebuildTask = Task {
@@ -884,6 +1237,13 @@ final class SlicerModel: ObservableObject {
                     Task { @MainActor in self?.uploadProgress = fraction }
                 }
                 self.uploadStatus = "Envoi terminé, démarrage…"
+                if self.useBox {
+                    // même préparation que QIDISlicer desktop : activer le Box et associer les outils aux emplacements
+                    let tools = (0..<self.extruderCount).map { $0 < self.boxSlots.count ? self.boxSlots[$0] : $0 }
+                    for command in QIDIBox.activationCommands(slots: tools, enabled: true) {
+                        try await client.sendGCode(command)
+                    }
+                }
                 try await client.startPrint(filename: file.lastPathComponent)
                 self.uploadStatus = "Impression lancée."
                 self.refreshPrinterStatus()
@@ -894,6 +1254,162 @@ final class SlicerModel: ObservableObject {
             self.uploadProgress = nil
             self.isUploading = false
         }
+    }
+
+    // MARK: Multi-filament et QIDI Box
+
+    /// Filament de chaque extrudeur ; vide = impression mono-filament.
+    @Published private(set) var extruderFilaments: [String] = []
+    /// Associer chaque extrudeur à un emplacement du QIDI Box avant de lancer l'impression.
+    @Published var useBox = UserDefaults.standard.bool(forKey: "qsid.box.use") {
+        didSet { UserDefaults.standard.set(useBox, forKey: "qsid.box.use") }
+    }
+    /// Emplacement du Box (0…15 = 1A…4D) de chaque extrudeur.
+    @Published var boxSlots: [Int] = (UserDefaults.standard.array(forKey: "qsid.box.slots") as? [Int]) ?? [] {
+        didSet { UserDefaults.standard.set(boxSlots, forKey: "qsid.box.slots") }
+    }
+    @Published private(set) var boxStatus: String?
+
+    var extruderCount: Int { max(extruderFilaments.count, 1) }
+    var isMultiFilament: Bool { extruderFilaments.count > 1 }
+
+    /// Couleurs des filaments (#RRGGBB), une par extrudeur, d'après la configuration effective.
+    var filamentColors: [String] {
+        let raw = value(of: "filament_colour") ?? ""
+        var colors = raw.split(separator: ";", omittingEmptySubsequences: false).map {
+            $0.trimmingCharacters(in: CharacterSet(charactersIn: "\" ")) }
+        while colors.count < extruderCount { colors.append(colors.last ?? "#3399FF") }
+        return Array(colors.prefix(extruderCount))
+    }
+
+    /// Fixe le nombre d'extrudeurs (1 à 16) en gardant les filaments déjà choisis.
+    func setExtruderCount(_ count: Int) {
+        let n = min(max(count, 1), QIDIBox.slotCount)
+        var names = isMultiFilament ? extruderFilaments : [selection.filament]
+        while names.count < n { names.append(names.last ?? selection.filament) }
+        applyExtruders(Array(names.prefix(n)))
+    }
+
+    func setExtruderFilament(_ index: Int, _ name: String) {
+        var names = isMultiFilament ? extruderFilaments : [selection.filament]
+        guard index >= 0, index < names.count else { return }
+        names[index] = name
+        applyExtruders(names)
+    }
+
+    /// Couleur d'un filament (remplace `filament_colour` pour cet extrudeur).
+    func setFilamentColor(_ index: Int, hex: String) {
+        var colors = filamentColors
+        guard index >= 0, index < colors.count else { return }
+        colors[index] = hex
+        overrides.set("filament_colour", colors.joined(separator: ";"), base: baseConfig)
+    }
+
+    private func applyExtruders(_ names: [String]) {
+        Task { await applyExtrudersNow(names) }
+    }
+
+    private func applyExtrudersNow(_ names: [String]) async {
+        do {
+            await overridesSyncTask?.value
+            let setup = try await onEngine { try $0.setExtruders(count: names.count, filaments: names) }
+            extruderFilaments = setup.count > 1 ? setup.filaments : []
+            if extruderFilaments.isEmpty { overrides.reset("filament_colour") }
+            while boxSlots.count < setup.count { boxSlots.append(QIDIBox.defaultSlots(count: setup.count)[boxSlots.count]) }
+            persistExtruders()
+            await refreshPresetLists()
+            await syncOverrides()
+            await refreshScene()
+            markStale()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func persistExtruders() {
+        if let data = try? JSONEncoder().encode(extruderFilaments) {
+            UserDefaults.standard.set(data, forKey: DefaultsKey.extruders)
+        }
+    }
+
+    private func restoreExtruders() async {
+        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.extruders),
+              let saved = try? JSONDecoder().decode([String].self, from: data), saved.count > 1 else { return }
+        await applyExtrudersNow(saved)
+    }
+
+    /// Lit l'association outil → emplacement enregistrée dans l'imprimante (variables Klipper).
+    func readBoxFromPrinter() {
+        guard moonraker.isConfigured else { errorMessage = MoonrakerError.notConfigured.localizedDescription; return }
+        let client = MoonrakerClient(config: moonraker)
+        boxStatus = L10n.t("Lecture du Box…")
+        Task {
+            do {
+                guard let variables = try await client.boxVariables() else {
+                    boxStatus = L10n.t("Aucune information de Box dans l'imprimante.")
+                    return
+                }
+                useBox = variables.enabled
+                var slots = boxSlots
+                for tool in 0..<min(slots.count, variables.slots.count) {
+                    if let slot = variables.slots[tool] { slots[tool] = slot }
+                }
+                boxSlots = slots
+                boxStatus = variables.enabled ? L10n.t("Box activé dans l'imprimante.") : L10n.t("Box désactivé dans l'imprimante.")
+            } catch {
+                boxStatus = nil
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    // MARK: Découverte des imprimantes
+
+    @Published private(set) var discoveredPrinters: [DiscoveredPrinter] = []
+    @Published private(set) var isDiscovering = false
+    @Published private(set) var discoveryProgress = 0.0
+    /// Recherche Bonjour (fournie par l'app : Network.framework n'existe pas partout) : adresses IPv4 annoncées.
+    var bonjourHosts: ((TimeInterval) async -> [String])?
+    private var discoveryTask: Task<Void, Never>?
+
+    /// Cherche les imprimantes Moonraker du réseau local : Bonjour d'abord (rapide), puis
+    /// balayage des sous-réseaux. `hosts` remplace la liste d'adresses (tests).
+    func startDiscovery(hosts: [String]? = nil, port: Int = 7125) {
+        guard !isDiscovering else { return }
+        isDiscovering = true
+        discoveryProgress = 0
+        discoveredPrinters = []
+        printerError = nil
+        let bonjour = bonjourHosts
+        discoveryTask = Task { [weak self] in
+            var candidates = hosts ?? []
+            if hosts == nil {
+                let announced = await bonjour?(2.5) ?? []
+                candidates = announced
+                let seen = Set(announced)
+                candidates += PrinterDiscovery.allCandidateHosts().filter { !seen.contains($0) }
+            }
+            let found = await PrinterDiscovery.scan(hosts: candidates, port: port) { done, total in
+                Task { @MainActor [weak self] in self?.discoveryProgress = total == 0 ? 1 : Double(done) / Double(total) }
+            }
+            guard let self else { return }
+            self.discoveredPrinters = found
+            self.discoveryProgress = 1
+            self.isDiscovering = false
+        }
+    }
+
+    func cancelDiscovery() {
+        discoveryTask?.cancel()
+        discoveryTask = nil
+        isDiscovering = false
+    }
+
+    /// Reprend l'adresse d'une imprimante trouvée et teste la connexion.
+    func usePrinter(_ printer: DiscoveredPrinter) {
+        moonraker.host = printer.host
+        moonraker.port = printer.port
+        refreshPrinterStatus()
     }
 
     func refreshPrinterStatus() {

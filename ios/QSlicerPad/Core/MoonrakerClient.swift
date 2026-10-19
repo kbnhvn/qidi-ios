@@ -98,6 +98,24 @@ struct MoonrakerClient {
         try Self.validate(response, data)
     }
 
+    /// Exécute des commandes G-code / Klipper (`POST /printer/gcode/script`).
+    func sendGCode(_ script: String) async throws {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=#;")   // ces caractères doivent être encodés dans la valeur
+        let escaped = script.addingPercentEncoding(withAllowedCharacters: allowed) ?? script
+        let req = try request("/printer/gcode/script?script=\(escaped)", method: "POST")
+        let (data, response) = try await send(req)
+        try Self.validate(response, data)
+    }
+
+    /// Variables Klipper (`save_variables`) : association outil -> emplacement du QIDI Box.
+    func boxVariables() async throws -> QIDIBox.Variables? {
+        let req = try request("/printer/objects/query?save_variables")
+        let (data, response) = try await send(req)
+        try Self.validate(response, data)
+        return QIDIBox.parseVariables(data)
+    }
+
     /// État de l'imprimante : état d'impression, progression, fichier, températures.
     func status() async throws -> PrinterStatus {
         let req = try request("/printer/objects/query?print_stats&display_status&extruder&heater_bed")

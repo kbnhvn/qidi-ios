@@ -58,6 +58,25 @@ struct TransformSection: View {
             } header: {
                 Text("\(L10n.t("Objet")) · \(object.name)")
             }
+
+            Section {
+                Button { model.beginCut() } label: {
+                    Label(L10n.t("Couper…"), systemImage: "scissors").frame(minHeight: 44)
+                }
+                Button { model.activeTool = .simplify(object.id) } label: {
+                    Label(L10n.t("Simplifier le maillage…"), systemImage: "square.3.layers.3d.down.right").frame(minHeight: 44)
+                }
+                Button { model.activeTool = .settings(object.id) } label: {
+                    HStack {
+                        Label(L10n.t("Réglages de l'objet…"), systemImage: "slider.horizontal.3")
+                        Spacer()
+                        if object.hasCustomSettings { Circle().fill(Color.orange).frame(width: 9, height: 9) }
+                    }
+                    .frame(minHeight: 44)
+                }
+            } header: {
+                Text(L10n.t("Outils"))
+            }
         }
     }
 

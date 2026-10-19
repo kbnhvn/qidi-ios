@@ -17,9 +17,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.4.0</string>
+	<string>0.5.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
@@ -52,9 +52,14 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 
-	<!-- Prévu pour la v2 (envoi vers Moonraker sur le réseau local). -->
+	<!-- Envoi vers Moonraker sur le réseau local et recherche des imprimantes (Bonjour + balayage). -->
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>QSlicerPad se connecte à votre imprimante QIDI (Moonraker) sur le réseau local pour lui envoyer le G-code.</string>
+	<string>QSlicerPad se connecte à votre imprimante QIDI (Moonraker) sur le réseau local pour la trouver et lui envoyer le G-code.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_moonraker._tcp</string>
+		<string>_http._tcp</string>
+	</array>
 
 	<!-- Types ouverts depuis Fichiers / AirDrop / « Ouvrir avec ». -->
 	<key>CFBundleDocumentTypes</key>

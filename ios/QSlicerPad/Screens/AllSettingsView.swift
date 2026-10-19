@@ -147,18 +147,39 @@ struct SettingsPageView: View {
 
 // MARK: - Une option
 
+/// D'où viennent et où vont les valeurs d'une ligne d'option : les réglages globaux
+/// (par défaut), ou ceux d'un objet / d'un modificateur / d'une plage de couches.
+struct OptionStore {
+    var value: (String) -> String?
+    var isModified: (String) -> Bool
+    /// Valeur affichée dans « Valeur du profil : … ».
+    var baseValue: (String) -> String?
+    var set: (String, String) -> Void
+    var reset: (String) -> Void
+}
+
 struct OptionRow: View {
     @EnvironmentObject private var model: SlicerModel
     let option: ConfigOption
     let catalog: SettingsCatalog
     var prefix: String?
+    var customStore: OptionStore?
+
+    private var store: OptionStore {
+        customStore ?? OptionStore(
+            value: { model.value(of: $0) },
+            isModified: { model.overrides.isModified($0) },
+            baseValue: { model.baseConfig[$0] },
+            set: { model.setOption($0, $1) },
+            reset: { model.resetOption($0) })
+    }
 
     @State private var showHelp = false
     @State private var text = ""
     @FocusState private var focused: Bool
 
-    private var current: String { model.value(of: option.key) ?? option.default ?? "" }
-    private var isModified: Bool { model.overrides.isModified(option.key) }
+    private var current: String { store.value(option.key) ?? option.default ?? "" }
+    private var isModified: Bool { store.isModified(option.key) }
     private var title: String {
         let label = catalog.label(option)
         if let prefix, !prefix.isEmpty, prefix != label { return "\(prefix) · \(label)" }
@@ -182,7 +203,7 @@ struct OptionRow: View {
                 Text(catalog.tooltip(option)).font(.footnote).foregroundStyle(.secondary)
             }
             if isModified {
-                Button { model.resetOption(option.key) } label: {
+                Button { store.reset(option.key) } label: {
                     Label(L10n.t("Valeur du profil : ") + presetValueText, systemImage: "arrow.uturn.backward")
                         .font(.footnote)
                 }
@@ -193,7 +214,7 @@ struct OptionRow: View {
     }
 
     private var presetValueText: String {
-        let raw = model.baseConfig[option.key] ?? option.default ?? ""
+        let raw = store.baseValue(option.key) ?? option.default ?? ""
         switch option.type {
         case "bool", "bools": return OptionValue.isTrue(OptionValue.first(raw)) ? L10n.t("oui") : L10n.t("non")
         case "enum", "enums": return catalog.enumLabel(option, value: OptionValue.first(raw))
@@ -267,11 +288,11 @@ struct OptionRow: View {
     // MARK: Validation
 
     private func set(_ value: String) {
-        model.setOption(option.key, option.isVector ? OptionValue.replacingFirst(of: current, with: value) : value)
+        store.set(option.key, option.isVector ? OptionValue.replacingFirst(of: current, with: value) : value)
     }
 
     private func commitText() {
-        if text != current { model.setOption(option.key, text) }
+        if text != current { store.set(option.key, text) }
     }
 
     private func commitNumber() {

@@ -2,7 +2,8 @@
 """Imitation minimale de Moonraker pour le test de bout en bout (scripts/e2e-linux.sh).
 
 Endpoints utilisés par l'app : POST /server/files/upload (multipart, root=gcodes),
-POST /printer/print/start?filename=…, GET /printer/objects/query?….
+POST /printer/print/start?filename=…, POST /printer/gcode/script?script=…,
+GET /printer/objects/query?…, /server/info, /printer/info.
 Écrit ce qu'il a reçu dans <journal>.json pour que le test puisse le vérifier.
 
     mock_moonraker.py <port|0> <journal.json> <fichier-port>
@@ -10,15 +11,21 @@ POST /printer/print/start?filename=…, GET /printer/objects/query?….
 import json
 import re
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+from urllib.parse import unquote
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT, LOG, PORT_FILE = int(sys.argv[1]), sys.argv[2], sys.argv[3]
-state = {"uploads": [], "started": [], "queries": 0, "api_keys": []}
+state = {"uploads": [], "started": [], "queries": 0, "api_keys": [], "scripts": [], "variables": {}}
+
+
+lock = threading.Lock()
 
 
 def save():
-    with open(LOG, "w") as f:
-        json.dump(state, f)
+    with lock:
+        with open(LOG, "w") as f:
+            json.dump(state, f)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,6 +63,15 @@ class Handler(BaseHTTPRequestHandler):
                                      "head": payload[:12].decode("latin-1")})
             save()
             self._json(201, {"result": {"item": {"path": filename}}})
+        elif self.path.startswith("/printer/gcode/script"):
+            script = unquote(self.path.split("script=", 1)[-1])
+            state["scripts"].append(script)
+            m = re.match(r"SAVE_VARIABLE VARIABLE=(\w+) VALUE=(.+)$", script)
+            if m:
+                value = m.group(2).replace('\\"', '"').strip('"')
+                state["variables"][m.group(1)] = int(value) if value.lstrip("-").isdigit() else value
+            save()
+            self._json(200, {"result": "ok"})
         elif self.path.startswith("/printer/print/start"):
             state["started"].append(self.path.split("filename=", 1)[-1])
             save()
@@ -64,7 +80,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "inconnu"})
 
     def do_GET(self):
-        if self.path.startswith("/printer/objects/query"):
+        if self.path.startswith("/server/info"):
+            self._json(200, {"result": {"klippy_connected": True, "klippy_state": "ready",
+                                        "moonraker_version": "v0.8.0-test", "api_version": [1, 0, 5]}})
+        elif self.path.startswith("/printer/info"):
+            self._json(200, {"result": {"state": "ready", "hostname": "qidi-mock", "software_version": "v0.12.0"}})
+        elif self.path.startswith("/printer/objects/query?save_variables"):
+            self._json(200, {"result": {"status": {"save_variables": {"variables": dict(state["variables"])}}}})
+        elif self.path.startswith("/printer/objects/query"):
             state["queries"] += 1
             save()
             started = bool(state["started"])
@@ -78,7 +101,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "inconnu"})
 
 
-server = HTTPServer(("127.0.0.1", PORT), Handler)
+server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+server.daemon_threads = True
 with open(PORT_FILE, "w") as f:
     f.write(str(server.server_address[1]))
 save()

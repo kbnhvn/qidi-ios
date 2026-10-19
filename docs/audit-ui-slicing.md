@@ -2,23 +2,26 @@
 
 Date : 19 octobre 2026 · Base auditée : `main` @ `de7db7e` (0.3.0 build 3)
 
-## Suivi d'implémentation (mise à jour après le travail des phases 0 à 6)
+## Suivi d'implémentation (mise à jour après les phases 0 à 6 et le second passage « ce qui n'était pas fait »)
 
 Légende : ✅ vérifié par une exécution (précisé) · 🟡 écrit et analysé (syntaxe + types du modèle/pont C
 sous Linux) mais **non exécuté** : il manque macOS/Xcode ou un iPad · ⛔ non fait.
 
 **Test de bout en bout du vrai modèle.** `scripts/e2e-linux.sh` compile le *vrai* `SlicerModel` et le *vrai*
 pont C (`QSlicerCore`) avec des substituts minimaux de SwiftUI/UIKit, le lie au moteur Linux et déroule un
-scénario complet (68 vérifications) : démarrage, presets, changement d'imprimante, import, déplacement,
+scénario complet (162 vérifications) : démarrage, presets, changement d'imprimante, import, déplacement,
 annuler/rétablir, hors-plateau, organiser, rotation, poser sur une face, copies, échelle, alerte d'unités,
 slicing, aperçu, réglages, préréglages, annulation du slicing, relance de l'app, export/import de profil,
-calibration. **Il a trouvé quatre vrais bugs** qu'aucune lecture n'avait vus :
+calibrations, multi-sélection, outils d'objet, multi-filament / QIDI Box, découverte réseau. **Il a trouvé cinq vrais bugs** qu'aucune lecture n'avait vus :
 (1) `undo()` plantait à la première utilisation (violation d'exclusivité d'accès Swift : deux `inout`
 croisés sur les piles d'annulation) ; (2) le filament choisi n'était **pas appliqué** à la configuration
 (avec un seul extrudeur `PresetBundle::full_config()` lit la collection, pas la sélection par extrudeur) ;
 (3) à la première utilisation le filament par défaut n'était jamais proposé (valeur mémorisée lue après
 avoir été écrasée) ; (4) l'export `.ini` pouvait omettre un réglage saisi à l'instant (course avec la
-synchronisation différée). Tous corrigés, avec un contrôle dans la gate pour le n° 2.
+synchronisation différée) ; (5) une plage de hauteurs sans `layer_height` (créée par la calibration du débit
+volumétrique) faisait **planter le moteur** : `layer_height_profile_from_ranges` déréférence un pointeur nul — le
+moteur complète désormais chaque plage comme le fait le bureau. Tous corrigés, avec un contrôle dans la gate
+pour les n° 2 et 5.
 
 **Ce que « vérifié » veut dire ici.** J'ai compilé le moteur (libslic3r + notre ABI) sous Linux et exécuté
 les gates contre le vrai bundle QIDI : `scripts/linux-engine.sh`. Ce banc reproduit exactement les chiffres
@@ -49,12 +52,12 @@ variantes de buse du modèle, l'app ne garde que celles de l'imprimante choisie)
 | Phase | État |
 |---|---|
 | 0 correctifs | cf. tableau ci-dessus |
-| 1 ABI scène/presets/slicing incrémental | ✅ 24 nouvelles fonctions C, gate de scène (90 vérifications) verte sur le vrai moteur et le vrai bundle ; `PresetBundle` remplace la résolution Swift ; `Print` conservé entre slicings |
-| 2 plateau et manipulation | ✅ logique (rayons, caméra, aimantation, poser sur une face, hors-plateau : tests Linux + moteur) · 🟡 vue SceneKit, gestes, inspecteur. Fait : plateau + volume + socle QIDI, sélection, glisser, rotation à deux doigts, caméra, champs numériques, copies, organiser, centrer, orientation d'origine, annuler/rétablir, conversion d'unités, clavier. **Pas fait** : menu contextuel par appui long (remplacé par la barre d'actions), « tout sélectionner », coupe, simplification de maillage |
+| 1 ABI scène/presets/slicing incrémental | ✅ 35 fonctions C (24 + coupe, simplification, réglages par objet, modificateurs, plages, multi-filament), gate de scène (163 vérifications) verte sur le vrai moteur et le vrai bundle ; `PresetBundle` remplace la résolution Swift ; `Print` conservé entre slicings |
+| 2 plateau et manipulation | ✅ logique (rayons, caméra, aimantation, poser sur une face, hors-plateau, sélection de groupe, plan de coupe : tests Linux + moteur) · ✅ coupe, simplification, multi-sélection (annuler en un pas, déplacement de groupe) exécutées contre le vrai moteur · 🟡 vue SceneKit, gestes, menu contextuel (appui long), inspecteur. Fait : plateau + volume + socle QIDI, sélection **multiple** et ⌘A, glisser (un objet ou tout le groupe), rotation à deux doigts, caméra, champs numériques, copies, organiser, centrer, orientation d'origine, annuler/rétablir, conversion d'unités, clavier, **menu contextuel par appui long / clic droit**, **coupe par plan** (plan visible sur le plateau, axes X/Y/Z, garder un côté, face coupée à plat), **simplification de maillage** |
 | 3 aperçu G-code | ✅ construction de la géométrie (tests) · 🟡 rendu : rubans à la largeur/hauteur réelles, 7 modes de couleur, légende (durée, %), masquage par type, déplacements, double curseur de couches, curseur de mouvements, lecture |
-| 4 réglages | ✅ schéma du moteur + disposition des onglets de `Tab.cpp` (306 options, 19 pages, **toutes présentes dans le schéma**) + 1 433 traductions du bureau, Simple/Avancé/Expert, recherche · 🟡 vues. Fait : modifié/retour au preset, paramètres fréquents, préréglages nommés, export `.ini`. **Pas fait** : réglages par objet et modificateurs, enregistrer sous *héritant* d'un preset (les préréglages sont des jeux de surcharges) |
-| 5 spécificités QIDI | ✅ vignettes (moteur) · ✅ calibration Pressure Advance (tour) et débit (grossier/fin) vérifiées par la gate · 🟡 Moonraker : envoi en flux avec progression, état et températures (logique testée ; réseau non exercé). **Pas fait** : calibration vitesse volumétrique (couches par plage), PA ligne/motif, QIDI Box (multi-filament), découverte réseau |
-| 6 qualité continue | ✅ 47 tests Swift sous Linux (décodage de sorties **réelles** du moteur), typecheck du modèle et du pont C, gate de scène, job CI `swift-tests` (sans minutes macOS), banc Linux du moteur |
+| 4 réglages | ✅ schéma du moteur + disposition des onglets de `Tab.cpp` (306 options, 19 pages, **toutes présentes dans le schéma**) + 1 433 traductions du bureau, Simple/Avancé/Expert, recherche · ✅ **réglages par objet, modificateurs (boîte, cylindre, sphère), bloqueurs / forceurs de supports et plages de hauteurs** exécutés contre le vrai moteur (le remplissage d'un objet ou d'un modificateur change réellement le filament consommé ; 152 options acceptées par objet, les autres refusées) · ✅ **préréglages qui héritent** d'imprimante / impression / filament de départ, avec indicateur « modifié », « mettre à jour » et « enregistrer sous » · 🟡 vues. Fait aussi : modifié/retour au preset, paramètres fréquents, export `.ini` |
+| 5 spécificités QIDI | ✅ vignettes (moteur) · ✅ calibrations Pressure Advance (tour, **ligne**, **motif**), débit (grossier/fin) et **débit volumétrique maximal** exécutées (G-code vérifié : valeurs de K, 14 plages de vitesses croissantes, un mur de 15 couches) · ✅ **multi-filament** : 1 à 16 extrudeurs, un filament par extrudeur, changements d'outil (`T1`) dans le G-code, aperçu par filament · ✅ **QIDI Box** : mêmes commandes Klipper que le bureau, vérifiées contre un Moonraker simulé (écriture et relecture des variables) · ✅ **découverte réseau** : balayage de sous-réseau et sonde `/server/info` testés contre le Moonraker simulé · 🟡 Bonjour (Network.framework, non exécutable sous Linux), envoi Moonraker réel. **Limites** : la lecture automatique du contenu du Box (couleur, matière) passe par un module réseau fermé absent des sources — non portée ; la correspondance des numéros d'emplacement avec le matériel n'a pas pu être confirmée ; les étiquettes numériques des calibrations PA (maillage de texte) sont remplacées par une légende |
+| 6 qualité continue | ✅ 82 tests Swift sous Linux (décodage de sorties **réelles** du moteur), typecheck du modèle et du pont C, gate de scène, contrôle des traductions (`scripts/tests/l10n_keys.py`), job CI `swift-tests` (sans minutes macOS), banc Linux du moteur |
 
 **Anomalies amont observées (non corrigées, sans effet sur les résultats)** : le bundle QIDI met
 `extruder_clearance_*` dans des presets d'impression (le moteur les retire en journalisant une erreur par

@@ -147,6 +147,15 @@ QSID_EXPORT int qsid_presets_select(qsid_ctx *ctx, const char *printer,
                                     const char *print, const char *filament,
                                     char **out_json, char *err_msg, size_t err_len);
 
+/* Impression multi-couleur / multi-filament (QIDI Box : jusqu'à 16 emplacements). Fixe le nombre
+ * d'extrudeurs (`count`, 1 à 16) et le filament de chacun (`filaments_json` : ["nom", …] ; un nom
+ * vide, absent ou incompatible = filament principal). Les objets choisissent leur extrudeur par le
+ * réglage « extruder » (qsid_object_config_set). La configuration (nozzle_diameter,
+ * filament_colour, matrice de purge…) suit le nombre d'extrudeurs ; le choix survit à un
+ * changement d'imprimante. out_json = {"count":n,"filaments":[…]}. */
+QSID_EXPORT int qsid_presets_set_extruders(qsid_ctx *ctx, int count, const char *filaments_json,
+                                           char **out_json, char *err_msg, size_t err_len);
+
 /* Remplace la base par un .ini complet (profil exporté du bureau). */
 QSID_EXPORT int qsid_config_load_ini(qsid_ctx *ctx, const char *path,
                                      char *err_msg, size_t err_len);

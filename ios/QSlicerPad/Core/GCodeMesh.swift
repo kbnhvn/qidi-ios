@@ -71,6 +71,8 @@ struct GCodeMove: Equatable {
     var layer: UInt32
     var type: UInt8
     var role: UInt8
+    /// Extrudeur (outil) qui imprime ce mouvement ; 0 pour une imprimante mono-filament.
+    var extruder: UInt8 = 0
 
     var moveType: GCodeMoveType { GCodeMoveType(rawValue: type) ?? .noop }
     var extrusionRole: GCodeRole { GCodeRole(rawValue: role) ?? .none }
@@ -78,8 +80,11 @@ struct GCodeMove: Equatable {
 }
 
 enum GCodeColorMode: String, CaseIterable, Identifiable {
-    case featureType, speed, height, width, fan, temperature, flow
+    case featureType, speed, height, width, fan, temperature, flow, tool
     var id: String { rawValue }
+
+    /// Modes à couleurs discrètes (légende par catégorie) plutôt qu'un dégradé de valeurs.
+    var isCategorical: Bool { self == .featureType || self == .tool }
 
     var label: String {
         switch self {
@@ -90,6 +95,7 @@ enum GCodeColorMode: String, CaseIterable, Identifiable {
         case .fan: return "Ventilateur"
         case .temperature: return "Température"
         case .flow: return "Débit volumique"
+        case .tool: return "Filament (outil)"
         }
     }
 
@@ -101,6 +107,7 @@ enum GCodeColorMode: String, CaseIterable, Identifiable {
         case .fan: return "%"
         case .temperature: return "°C"
         case .flow: return "mm³/s"
+        case .tool: return ""
         }
     }
 
@@ -113,6 +120,7 @@ enum GCodeColorMode: String, CaseIterable, Identifiable {
         case .fan: return move.fanSpeed
         case .temperature: return move.temperature
         case .flow: return move.volumetricFlow
+        case .tool: return Float(move.extruder)
         }
     }
 }
@@ -157,6 +165,8 @@ struct GCodeMesh {
     var segmentCount: Int { layers.reduce(0) { $0 + $1.indices.count / (fullDetail ? 18 : 6) } }
 }
 
+typealias GCodeRGB = (UInt8, UInt8, UInt8)
+
 struct GCodeMeshBuilder {
     var mode: GCodeColorMode = .featureType
     /// Au-delà, les rubans n'ont plus de flancs.
@@ -166,6 +176,29 @@ struct GCodeMeshBuilder {
     var includeTravel = true
     /// Rôles masqués (légende interactive).
     var hiddenRoles: Set<UInt8> = []
+    /// Couleur de chaque filament (mode « outil »), dans l'ordre des extrudeurs.
+    var toolColors: [GCodeRGB] = []
+
+    /// « #FF8000;#00ff00 » (filament_colour) -> couleurs. Les valeurs illisibles donnent le gris.
+    static func parseColors(_ raw: String) -> [GCodeRGB] {
+        raw.split(separator: ";", omittingEmptySubsequences: false).map { part in
+            let hex = part.trimmingCharacters(in: CharacterSet(charactersIn: "# \"")).uppercased()
+            guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return (160, 160, 160) }
+            return (UInt8(value >> 16 & 255), UInt8(value >> 8 & 255), UInt8(value & 255))
+        }
+    }
+
+    /// Couleur de secours quand la configuration n'en donne pas assez (palette distincte).
+    static let fallbackToolColors: [GCodeRGB] = [
+        (51, 153, 255), (255, 128, 0), (60, 190, 90), (230, 60, 60), (160, 90, 210), (240, 200, 40),
+        (40, 200, 200), (240, 120, 180),
+    ]
+
+    func toolColor(_ extruder: UInt8) -> GCodeRGB {
+        let i = Int(extruder)
+        if i < toolColors.count { return toolColors[i] }
+        return Self.fallbackToolColors[i % Self.fallbackToolColors.count]
+    }
 
     func build(moves: [GCodeMove]) -> GCodeMesh {
         var extrusions = 0
@@ -177,7 +210,7 @@ struct GCodeMeshBuilder {
             maxLayer = max(maxLayer, m.layer)
             guard m.moveType == .extrude else { continue }
             extrusions += 1
-            if mode != .featureType {
+            if !mode.isCategorical {
                 let v = mode.value(of: m)
                 scalarLo = min(scalarLo, v); scalarHi = max(scalarHi, v)
             }
@@ -222,12 +255,13 @@ struct GCodeMeshBuilder {
 
         if lo.x > hi.x { lo = .zero; hi = .zero }
         return GCodeMesh(layers: layers, boundsMin: lo, boundsMax: hi,
-                         valueRange: mode == .featureType || scalarLo > scalarHi ? nil : (scalarLo, scalarHi),
+                         valueRange: mode.isCategorical || scalarLo > scalarHi ? nil : (scalarLo, scalarHi),
                          fullDetail: full, simplified: simplify)
     }
 
     private func color(for move: GCodeMove, range: (Float, Float)) -> (UInt8, UInt8, UInt8) {
         if mode == .featureType { return move.extrusionRole.rgb }
+        if mode == .tool { return toolColor(move.extruder) }
         let span = range.1 - range.0
         return gcodeRangeColor(span > 1e-6 ? (mode.value(of: move) - range.0) / span : 0.5)
     }

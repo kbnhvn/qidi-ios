@@ -47,6 +47,12 @@ struct WorkspaceView: View {
             .toolbar { toolbar }
             .sheet(isPresented: $showSettings) { SettingsView().environmentObject(model) }
             .sheet(item: $calibrationSheet) { kind in CalibrationSheet(kind: kind).environmentObject(model) }
+            .sheet(item: $model.activeTool) { tool in
+                switch tool {
+                case .simplify(let id): SimplifySheet(objectID: id).environmentObject(model)
+                case .settings(let id): ObjectSettingsView(objectID: id).environmentObject(model)
+                }
+            }
             .sheet(isPresented: $showInspector) {
                 NavigationStack {
                     InspectorView(isImportingModel: $isImportingModel, isImportingProfile: $isImportingProfile)
@@ -108,6 +114,9 @@ struct WorkspaceView: View {
                 .accessibilityLabel(L10n.t("Importer un modèle…"))
             Menu {
                 Button(L10n.t("Pressure Advance (tour)…")) { calibrationSheet = .pressureAdvance }
+                Button(L10n.t("Pressure Advance (ligne)…")) { calibrationSheet = .paLine }
+                Button(L10n.t("Pressure Advance (motif)…")) { calibrationSheet = .paPattern }
+                Button(L10n.t("Débit volumétrique maximal…")) { calibrationSheet = .volumetricSpeed }
                 Button(L10n.t("Débit — calibration grossière")) { model.startCalibration(.flowCoarse) }
                 Button(L10n.t("Débit — calibration fine…")) { calibrationSheet = .flowFine }
             } label: { Image(systemName: "gauge.with.dots.needle.33percent") }

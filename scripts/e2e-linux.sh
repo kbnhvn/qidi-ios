@@ -48,7 +48,7 @@ echo "==> compilation du test (SlicerModel + QSlicerCore + Core/*.swift)"
     "$A/Model/SlicerModel.swift" "$A/Core/QSlicerCore.swift" "$A/Core/SceneTypes.swift" \
     "$A/Core/SliceOverrides.swift" "$A/Core/FilamentIndex.swift" "$A/Core/GCodeMesh.swift" \
     "$A/Core/SettingsCatalog.swift" "$A/Core/Calibration.swift" "$A/Core/MoonrakerClient.swift" \
-    "$A/Core/BedGeometry.swift" "$A/Core/L10n.swift" \
+    "$A/Core/BedGeometry.swift" "$A/Core/CalibrationGCode.swift" "$A/Core/PrinterDiscovery.swift" "$A/Core/UserPresets.swift" "$A/Core/QIDIBox.swift" "$A/Core/CutPlane.swift" "$A/Core/ObjectSettings.swift" "$A/Core/L10n.swift" \
     "${link_args[@]}" -o "$W/e2e"
 
 echo "==> Moonraker simulé"
@@ -64,5 +64,5 @@ QSID_RESOURCES_DIR="${QSID_RESOURCES_DIR:-$QSID_SRC/resources}" \
 QSID_CONFIG_DIR="$A/Resources/config" \
 QSID_E2E_OUT="$W/out" \
 QSID_TESTDATA="$QSID_ROOT/testdata" \
-    "$W/e2e" 2>&1 | { grep -v "Vendor Config Bundle\|invalid toolchange" || true; }
+    "$W/e2e" 2>&1 | { grep --line-buffered -v "Vendor Config Bundle\|invalid toolchange" || true; }
 exit "${PIPESTATUS[0]}"

@@ -52,16 +52,27 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     private var geometries: [UInt64: (count: Int, geometry: SCNGeometry)] = [:]
     private var bedSignature = ""
     private var lastScene: SceneInfo?
-    private var lastSelection: UInt64?
+    private var lastSelection: Set<UInt64> = []
+    private var lastCut: CutPlane?
+    private let cutNode = SCNNode()
     private var lastMeshCounts: [UInt64: Int] = [:]
     private var handledCameraToken = 0
     /// Le premier cadrage se fait avant que la vue ait sa taille : on le refait une fois, taille connue.
     private var framedWithRealSize = false
 
     // état d'un geste
+    /// Une instance déplacée par le geste (un seul objet, ou tout le groupe sélectionné).
+    private struct Mover {
+        var id: UInt64
+        var instance: Int
+        var startMatrix: simd_float4x4
+        var startOffset: [Double]
+        var boxMin: Vec3
+        var boxMax: Vec3
+    }
+
     private enum Drag {
-        case object(id: UInt64, instance: Int, startMatrix: simd_float4x4, startHit: Vec3, planeZ: Double,
-                    startOffset: [Double], boxMin: Vec3, boxMax: Vec3)
+        case objects(movers: [Mover], startHit: Vec3, planeZ: Double)
         case orbit
     }
     private var drag: Drag?
@@ -69,7 +80,7 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
     private var rotationStart: (id: UInt64, matrix: simd_float4x4, rotationZ: Double)?
     private var wasOutsideDuringDrag = false
     private var isDraggingObject: Bool {
-        if case .some(.object) = drag { return true }
+        if case .some(.objects) = drag { return true }
         return false
     }
 
@@ -90,6 +101,7 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         scene.rootNode.addChildNode(cameraNode)
         scene.rootNode.addChildNode(bedNode)
         scene.rootNode.addChildNode(objectsNode)
+        scene.rootNode.addChildNode(cutNode)
 
         let ambient = SCNNode()
         ambient.light = SCNLight()
@@ -124,6 +136,8 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         doubleTap.numberOfTapsRequired = 2
         tap.require(toFail: doubleTap)
         [one, two, pinch, rotation, tap, doubleTap].forEach { view.addGestureRecognizer($0) }
+        // Appui long (ou clic droit) sur un objet : menu contextuel.
+        view.addInteraction(UIContextMenuInteraction(delegate: self))
         sync()
     }
 
@@ -144,15 +158,17 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         }
 
         let scene = model.scene
-        let selection = model.selectedObjectID
+        let selection = model.selectedObjectIDs
         let counts = model.meshes.mapValues(\.count)
-        if scene == lastScene, selection == lastSelection, counts == lastMeshCounts { return }
+        let cut = model.cutPlane
+        if scene == lastScene, selection == lastSelection, counts == lastMeshCounts, cut == lastCut { return }
         // pendant un geste d'objet, la vue fait foi : on ne l'écrase pas
         if isDraggingObject { return }
-        lastScene = scene; lastSelection = selection; lastMeshCounts = counts
+        lastScene = scene; lastSelection = selection; lastMeshCounts = counts; lastCut = cut
 
         if let scene { syncBed(scene.bed) }
         syncObjects(scene, selection: selection)
+        syncCutPlane(scene, plane: cut)
     }
 
     private func handleCameraRequest() {
@@ -315,7 +331,7 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
         outside ? Self.outsideColor : (selected ? Self.selectedColor : Self.normalColor)
     }
 
-    private func syncObjects(_ scene: SceneInfo?, selection: UInt64?) {
+    private func syncObjects(_ scene: SceneInfo?, selection: Set<UInt64>) {
         var live = Set<String>()
         for object in scene?.objects ?? [] {
             guard let base = geometry(for: object.id) else { continue }
@@ -336,8 +352,9 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
                     node.geometry = base.copy() as? SCNGeometry
                     node.geometry?.materials = [base.firstMaterial?.copy() as? SCNMaterial ?? SCNMaterial()]
                 }
-                node.geometry?.firstMaterial?.diffuse.contents = color(selected: object.id == selection, outside: instance.outside)
+                node.geometry?.firstMaterial?.diffuse.contents = color(selected: selection.contains(object.id), outside: instance.outside)
                 node.simdTransform = Self.simdMatrix(instance.matrix)
+                syncModifiers(of: object, on: node, selected: selection.contains(object.id))
             }
         }
         for (key, node) in instanceNodes where !live.contains(key) {
@@ -345,6 +362,74 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
             instanceNodes[key] = nil
         }
         for id in geometries.keys where model.meshes[id] == nil { geometries[id] = nil }
+    }
+
+    /// Modificateurs et bloqueurs / forceurs de supports : volumes translucides fils de l'instance.
+    private func syncModifiers(of object: SceneObject, on node: SCNNode, selected: Bool) {
+        node.childNodes.filter { $0.name?.hasPrefix("mod#") == true }.forEach { $0.removeFromParentNode() }
+        for volume in object.modifiers {
+            let shape: SCNGeometry
+            switch volume.name {
+            case "cylinder": shape = SCNCylinder(radius: 0.5, height: 1)
+            case "sphere": shape = SCNSphere(radius: 0.5)
+            default: shape = SCNBox(width: 1, height: 1, length: 1, chamferRadius: 0)
+            }
+            let material = SCNMaterial()
+            let tint: UIColor
+            switch volume.kind {
+            case "blocker": tint = .systemRed
+            case "enforcer": tint = .systemGreen
+            default: tint = .systemBlue
+            }
+            material.diffuse.contents = tint.withAlphaComponent(selected ? 0.45 : 0.30)
+            material.lightingModel = .constant
+            material.isDoubleSided = true
+            material.writesToDepthBuffer = false
+            shape.materials = [material]
+            let child = SCNNode(geometry: shape)
+            // SCNCylinder a son axe selon Y ; celui du moteur est selon Z.
+            if volume.name == "cylinder" { child.eulerAngles = SCNVector3(Float.pi / 2, 0, 0) }
+            let holder = SCNNode()
+            holder.name = "mod#\(volume.id)"
+            holder.position = SCNVector3(Float(volume.offset[0]), Float(volume.offset[1]), Float(volume.offset[2]))
+            // taille et position sont dans le repère de l'objet : le nœud d'instance applique le reste
+            holder.scale = SCNVector3(Float(volume.size[0]), Float(volume.size[1]), Float(volume.size[2]))
+            holder.addChildNode(child)
+            node.addChildNode(holder)
+        }
+    }
+
+    /// Plan de coupe : rectangle translucide à travers l'objet visé.
+    private func syncCutPlane(_ scene: SceneInfo?, plane: CutPlane?) {
+        cutNode.childNodes.forEach { $0.removeFromParentNode() }
+        guard let plane,
+              let inst = scene?.objects.first(where: { $0.id == plane.objectID })?.instances.first else { return }
+        let size = inst.size
+        let margin = 12.0
+        let center = plane.point(in: inst)
+        let geometry: SCNPlane
+        let node: SCNNode
+        switch plane.axis {
+        case .z:
+            geometry = SCNPlane(width: size[0] + margin, height: size[1] + margin)
+            node = SCNNode(geometry: geometry)
+        case .x:
+            geometry = SCNPlane(width: size[1] + margin, height: size[2] + margin)
+            node = SCNNode(geometry: geometry)
+            node.eulerAngles = SCNVector3(Float.pi / 2, 0, Float.pi / 2)   // normale vers +X
+        case .y:
+            geometry = SCNPlane(width: size[0] + margin, height: size[2] + margin)
+            node = SCNNode(geometry: geometry)
+            node.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)   // normale vers -Y (double face)
+        }
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.systemTeal.withAlphaComponent(0.35)
+        material.lightingModel = .constant
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = false
+        geometry.materials = [material]
+        node.position = SCNVector3(Float(center[0]), Float(center[1]), Float(center[2]))
+        cutNode.addChildNode(node)
     }
 
     static func simdMatrix(_ m: [Double]) -> simd_float4x4 {
@@ -398,10 +483,12 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
             model.layOnFace(objectID: id, triangle: hit.index)
             return
         }
+        // ⌘ ou ⇧ (clavier matériel) ou mode « sélection multiple » : ajoute / retire de la sélection
+        let additive = model.multiSelectMode || g.modifierFlags.contains(.command) || g.modifierFlags.contains(.shift)
         if let hit = pickObject(r) {
-            if model.selectedObjectID != hit.id { UISelectionFeedbackGenerator().selectionChanged() }
-            model.selectedObjectID = hit.id
-        } else {
+            UISelectionFeedbackGenerator().selectionChanged()
+            if additive { model.toggleSelection(hit.id) } else { model.selectedObjectID = hit.id }
+        } else if !additive {
             model.selectedObjectID = nil
             model.layOnFaceMode = false
         }
@@ -418,15 +505,23 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
             let r = ray(at: g.location(in: view))
             if let hit = pickObject(r),
                let object = model.scene?.objects.first(where: { $0.id == hit.id }),
-               hit.instance < object.instances.count,
-               let node = instanceNodes["\(hit.id)#\(hit.instance)"] {
+               hit.instance < object.instances.count {
                 let point = r.origin + r.direction * hit.distance
-                model.selectedObjectID = hit.id
-                lastSelection = hit.id
+                // Un objet de la sélection multiple entraîne tout le groupe ; sinon il devient la sélection.
+                if !(model.hasMultipleSelected && model.isSelected(hit.id)) { model.selectedObjectID = hit.id }
+                lastSelection = model.selectedObjectIDs
                 wasOutsideDuringDrag = object.instances[hit.instance].outside
-                drag = .object(id: hit.id, instance: hit.instance, startMatrix: node.simdTransform, startHit: point,
-                               planeZ: point.z, startOffset: object.instances[hit.instance].offset,
-                               boxMin: hit.boxMin, boxMax: hit.boxMax)
+                var movers: [Mover] = []
+                for member in model.selectedObjects {
+                    for (index, instance) in member.instances.enumerated() {
+                        guard let node = instanceNodes["\(member.id)#\(index)"] else { continue }
+                        movers.append(Mover(id: member.id, instance: index, startMatrix: node.simdTransform,
+                                            startOffset: instance.offset,
+                                            boxMin: Vec3(instance.min[0], instance.min[1], instance.min[2]),
+                                            boxMax: Vec3(instance.max[0], instance.max[1], instance.max[2])))
+                    }
+                }
+                drag = .objects(movers: movers, startHit: point, planeZ: point.z)
                 UISelectionFeedbackGenerator().selectionChanged()
             } else {
                 drag = .orbit
@@ -436,22 +531,26 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
             let dx = Double(t.x - lastPan.x), dy = Double(t.y - lastPan.y)
             lastPan = t
             switch drag {
-            case .some(.object(let id, let instance, let startMatrix, let startHit, let planeZ, _, let boxMin, let boxMax)):
+            case .some(.objects(let movers, let startHit, let planeZ)):
                 guard let hit = Picking.intersect(ray(at: g.location(in: view)), planeZ: planeZ) else { return }
                 let delta = hit - startHit
-                var m = startMatrix
-                m.columns.3.x += Float(delta.x)
-                m.columns.3.y += Float(delta.y)
-                instanceNodes["\(id)#\(instance)"]?.simdTransform = m
-                if let bed = model.scene?.bed {
-                    let outside = BedBounds.isOutside(min: boxMin + Vec3(delta.x, delta.y, 0),
-                                                      max: boxMax + Vec3(delta.x, delta.y, 0), bed: bed)
-                    instanceNodes["\(id)#\(instance)"]?.geometry?.firstMaterial?.diffuse.contents =
-                        color(selected: true, outside: outside)
-                    if outside != wasOutsideDuringDrag {
-                        wasOutsideDuringDrag = outside
-                        UIImpactFeedbackGenerator(style: outside ? .rigid : .soft).impactOccurred()
+                var anyOutside = false
+                for mover in movers {
+                    var m = mover.startMatrix
+                    m.columns.3.x += Float(delta.x)
+                    m.columns.3.y += Float(delta.y)
+                    let node = instanceNodes["\(mover.id)#\(mover.instance)"]
+                    node?.simdTransform = m
+                    if let bed = model.scene?.bed {
+                        let outside = BedBounds.isOutside(min: mover.boxMin + Vec3(delta.x, delta.y, 0),
+                                                          max: mover.boxMax + Vec3(delta.x, delta.y, 0), bed: bed)
+                        anyOutside = anyOutside || outside
+                        node?.geometry?.firstMaterial?.diffuse.contents = color(selected: true, outside: outside)
                     }
+                }
+                if anyOutside != wasOutsideDuringDrag {
+                    wasOutsideDuringDrag = anyOutside
+                    UIImpactFeedbackGenerator(style: anyOutside ? .rigid : .soft).impactOccurred()
                 }
             case .some(.orbit):
                 orbit.orbit(deltaX: dx, deltaY: dy)
@@ -460,16 +559,21 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
                 break
             }
         case .ended, .cancelled, .failed:
-            if case .some(.object(let id, let instance, let startMatrix, _, _, let startOffset, _, _)) = drag,
-               let node = instanceNodes["\(id)#\(instance)"] {
-                let m = node.simdTransform
-                let dx = Double(m.columns.3.x - startMatrix.columns.3.x)
-                let dy = Double(m.columns.3.y - startMatrix.columns.3.y)
-                if abs(dx) > 1e-4 || abs(dy) > 1e-4 {
-                    // validé auprès du moteur ; l'état moteur revient ensuite dans `scene`
-                    model.transform(objectID: id, instance: instance,
-                                    offset: [startOffset[0] + dx, startOffset[1] + dy, startOffset[2]])
+            if case .some(.objects(let movers, _, _)) = drag {
+                var changes: [SlicerModel.TransformChange] = []
+                for mover in movers {
+                    guard let node = instanceNodes["\(mover.id)#\(mover.instance)"] else { continue }
+                    let m = node.simdTransform
+                    let dx = Double(m.columns.3.x - mover.startMatrix.columns.3.x)
+                    let dy = Double(m.columns.3.y - mover.startMatrix.columns.3.y)
+                    if abs(dx) > 1e-4 || abs(dy) > 1e-4 {
+                        changes.append(SlicerModel.TransformChange(
+                            objectID: mover.id, instance: mover.instance,
+                            offset: [mover.startOffset[0] + dx, mover.startOffset[1] + dy, mover.startOffset[2]]))
+                    }
                 }
+                // validé auprès du moteur ; l'état moteur revient ensuite dans `scene`
+                if !changes.isEmpty { model.applyTransforms(changes) }
             }
             drag = nil
             // La vue garde sa position jusqu'à ce que le moteur ait validé la transformation :
@@ -523,6 +627,71 @@ final class BedSceneCoordinator: NSObject, UIGestureRecognizerDelegate {
             lastScene = nil
         default:
             break
+        }
+    }
+}
+
+// MARK: - Menu contextuel (appui long / clic droit)
+
+extension BedSceneCoordinator: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                configurationForMenuAtLocation location: CGPoint) -> UIContextMenuConfiguration? {
+        guard let hit = pickObject(ray(at: location)) else { return nil }
+        let model = self.model
+        // Un objet hors de la sélection devient la sélection ; un objet du groupe garde le groupe.
+        if !model.isSelected(hit.id) { model.selectedObjectID = hit.id }
+        let group = model.hasMultipleSelected
+        let id = hit.id
+
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            var edit: [UIMenuElement] = [
+                UIAction(title: L10n.t("Dupliquer"), image: UIImage(systemName: "plus.square.on.square")) { _ in
+                    model.duplicateSelected()
+                },
+                UIAction(title: L10n.t("Poser sur le plateau"), image: UIImage(systemName: "arrow.down.to.line")) { _ in
+                    model.dropSelectedToBed()
+                },
+                UIAction(title: L10n.t("Orientation d'origine"), image: UIImage(systemName: "arrow.counterclockwise")) { _ in
+                    model.resetRotationOfSelection()
+                },
+            ]
+            if !group {
+                edit.insert(UIAction(title: L10n.t("Poser sur une face"),
+                                     image: UIImage(systemName: "square.3.layers.3d.down.forward")) { _ in
+                    model.layOnFaceMode = true
+                }, at: 1)
+            }
+
+            var tools: [UIMenuElement] = []
+            if !group {
+                tools = [
+                    UIAction(title: L10n.t("Couper…"), image: UIImage(systemName: "scissors")) { _ in model.beginCut() },
+                    UIAction(title: L10n.t("Simplifier le maillage…"),
+                             image: UIImage(systemName: "square.3.layers.3d.down.right")) { _ in
+                        model.activeTool = .simplify(id)
+                    },
+                    UIAction(title: L10n.t("Réglages de l'objet…"), image: UIImage(systemName: "slider.horizontal.3")) { _ in
+                        model.activeTool = .settings(id)
+                    },
+                ]
+            }
+
+            let selection: [UIMenuElement] = [
+                UIAction(title: L10n.t("Tout sélectionner"), image: UIImage(systemName: "square.dashed.inset.filled")) { _ in
+                    model.selectAll()
+                },
+                UIAction(title: L10n.t("Organiser"), image: UIImage(systemName: "square.grid.3x3.square")) { _ in
+                    model.arrange()
+                },
+            ]
+            let delete = UIAction(title: L10n.t("Supprimer"), image: UIImage(systemName: "trash"),
+                                  attributes: .destructive) { _ in model.deleteSelected() }
+
+            var children: [UIMenuElement] = [UIMenu(options: .displayInline, children: edit)]
+            if !tools.isEmpty { children.append(UIMenu(options: .displayInline, children: tools)) }
+            children.append(UIMenu(options: .displayInline, children: selection))
+            children.append(UIMenu(options: .displayInline, children: [delete]))
+            return UIMenu(children: children)
         }
     }
 }

@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var language: String = L10n.language
+    @State private var showDiscovery = false
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,7 @@ struct SettingsView: View {
                     Button(L10n.t("Terminé")) { dismiss() }
                 }
             }
+            .sheet(isPresented: $showDiscovery) { PrinterDiscoverySheet().environmentObject(model) }
             .onChange(of: language) { _, newValue in
                 L10n.language = newValue
                 model.languageVersion += 1
@@ -36,6 +38,9 @@ struct SettingsView: View {
 
     private var printerSection: some View {
         Section {
+            Button { showDiscovery = true } label: {
+                Label(L10n.t("Rechercher mon imprimante"), systemImage: "dot.radiowaves.left.and.right").frame(minHeight: 44)
+            }
             TextField(L10n.t("Ex. 192.168.1.42 ou qidi.local"), text: $model.moonraker.host)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()

@@ -177,6 +177,23 @@ final class SlicerCore {
         return PresetSelection(printer: d["printer"] ?? "", print: d["print"] ?? "", filament: d["filament"] ?? "")
     }
 
+    struct ExtruderSetup: Decodable, Equatable {
+        var count: Int
+        var filaments: [String]
+    }
+
+    /// Nombre d'extrudeurs (1 à 16, QIDI Box) et filament de chacun ; un nom vide = filament principal.
+    @discardableResult
+    func setExtruders(count: Int, filaments: [String]) throws -> ExtruderSetup {
+        guard let context else { throw SlicerCoreError.unavailable }
+        let data = try JSONEncoder().encode(filaments)
+        let json = String(decoding: data, as: UTF8.self)
+        let reply = try jsonCall { out, e, n in
+            json.withCString { qsid_presets_set_extruders(context, Int32(count), $0, out, e, n) }
+        }
+        return try SceneJSON.decode(ExtruderSetup.self, from: reply)
+    }
+
     func loadConfigINI(_ url: URL) throws {
         guard let context else { throw SlicerCoreError.unavailable }
         try errorCall { e, n in url.path.withCString { qsid_config_load_ini(context, $0, e, n) } }
@@ -293,6 +310,97 @@ final class SlicerCore {
         try Self.check(status, error)
     }
 
+    // Coupe, simplification, réglages par objet
+
+    /// Coupe l'objet par un plan (repère monde). `keep` : 1 = dessus, 2 = dessous, 3 = les deux.
+    func cut(objectID: UInt64, instance: Int = 0, point: [Double], normal: [Double],
+             keep: Int = 3, placeOnCut: Bool = false) throws -> SceneCutResult {
+        guard let context else { throw SlicerCoreError.unavailable }
+        guard point.count == 3, normal.count == 3 else { throw SlicerCoreError.invalidArgument("plan invalide") }
+        let json = try jsonCall { out, e, n in
+            point.withUnsafeBufferPointer { p in normal.withUnsafeBufferPointer { nrm in
+                qsid_scene_cut(context, objectID, Int32(instance), p.baseAddress, nrm.baseAddress,
+                               Int32(keep), placeOnCut ? 1 : 0, out, e, n)
+            } }
+        }
+        return try SceneJSON.decode(SceneCutResult.self, from: json)
+    }
+
+    /// Garde environ `ratio` (0..1, exclu) des triangles.
+    func simplify(objectID: UInt64, ratio: Double) throws -> SceneSimplifyResult {
+        guard let context else { throw SlicerCoreError.unavailable }
+        let json = try jsonCall { out, e, n in qsid_scene_simplify(context, objectID, ratio, out, e, n) }
+        return try SceneJSON.decode(SceneSimplifyResult.self, from: json)
+    }
+
+    /// `volumeID == 0` : réglage de l'objet ; sinon réglage du modificateur.
+    func setObjectConfig(objectID: UInt64, volumeID: UInt64 = 0, key: String, value: String) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        try errorCall { e, n in key.withCString { k in value.withCString { v in
+            qsid_object_config_set(context, objectID, volumeID, k, v, e, n)
+        } } }
+    }
+
+    /// `key == nil` : retire tous les réglages de la cible.
+    func resetObjectConfig(objectID: UInt64, volumeID: UInt64 = 0, key: String? = nil) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        let status: Int32 = key.map { k in k.withCString { qsid_object_config_reset(context, objectID, volumeID, $0) } }
+            ?? qsid_object_config_reset(context, objectID, volumeID, nil)
+        try Self.check(status)
+    }
+
+    /// shape : "box" | "cylinder" | "sphere" ; kind : 0 modificateur, 1 bloqueur, 2 forceur de supports.
+    @discardableResult
+    func addModifier(objectID: UInt64, shape: String, kind: Int = 0, centerWorld: [Double], size: [Double]) throws -> UInt64 {
+        guard let context else { throw SlicerCoreError.unavailable }
+        guard centerWorld.count == 3, size.count == 3 else { throw SlicerCoreError.invalidArgument("dimensions invalides") }
+        let json = try jsonCall { out, e, n in
+            shape.withCString { sh in centerWorld.withUnsafeBufferPointer { c in size.withUnsafeBufferPointer { s in
+                qsid_object_add_modifier(context, objectID, sh, Int32(kind), c.baseAddress, s.baseAddress, out, e, n)
+            } } }
+        }
+        struct Reply: Decodable { var volumeId: UInt64 }
+        return try SceneJSON.decode(Reply.self, from: json).volumeId
+    }
+
+    func setModifier(objectID: UInt64, volumeID: UInt64, centerWorld: [Double]?, size: [Double]?) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        func with3(_ v: [Double]?, _ body: (UnsafePointer<Double>?) -> Int32) -> Int32 {
+            guard let v, v.count == 3 else { return body(nil) }
+            return v.withUnsafeBufferPointer { body($0.baseAddress) }
+        }
+        let status = with3(centerWorld) { c in with3(size) { s in qsid_object_set_modifier(context, objectID, volumeID, c, s) } }
+        try Self.check(status)
+    }
+
+    func removeVolume(objectID: UInt64, volumeID: UInt64) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        try Self.check(qsid_object_remove_volume(context, objectID, volumeID))
+    }
+
+    /// Crée la plage si besoin ; `key`/`value` fixent un réglage.
+    func setLayerRange(objectID: UInt64, minZ: Double, maxZ: Double, key: String? = nil, value: String? = nil) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        var error = [CChar](repeating: 0, count: 512)
+        let status: Int32
+        if let key, let value {
+            status = key.withCString { k in value.withCString { v in
+                qsid_layer_range_set(context, objectID, minZ, maxZ, k, v, &error, error.count)
+            } }
+        } else {
+            status = qsid_layer_range_set(context, objectID, minZ, maxZ, nil, nil, &error, error.count)
+        }
+        try Self.check(status, error)
+    }
+
+    /// `key == nil` : supprime la plage entière.
+    func removeLayerRange(objectID: UInt64, minZ: Double, maxZ: Double, key: String? = nil) throws {
+        guard let context else { throw SlicerCoreError.unavailable }
+        let status: Int32 = key.map { k in k.withCString { qsid_layer_range_remove(context, objectID, minZ, maxZ, $0) } }
+            ?? qsid_layer_range_remove(context, objectID, minZ, maxZ, nil)
+        try Self.check(status)
+    }
+
     /// Slice la scène avec la configuration effective ; retourne le résumé (durée, filament…).
     func sliceScene(output: URL, progress: @escaping (Int32, String) -> Void) throws -> SliceSummary {
         guard let context else { throw SlicerCoreError.unavailable }
@@ -367,6 +475,6 @@ extension GCodeMove {
     init(_ m: qsid_move) {
         self.init(x: m.x, y: m.y, z: m.z, feedrate: m.feedrate, width: m.width, height: m.height,
                   fanSpeed: m.fan_speed, temperature: m.temperature, time: m.time, eDelta: m.e_delta,
-                  layer: m.layer, type: m.type, role: m.role)
+                  layer: m.layer, type: m.type, role: m.role, extruder: m.extruder)
     }
 }

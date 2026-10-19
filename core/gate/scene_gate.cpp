@@ -201,8 +201,17 @@ int main(int argc, char **argv)
     std::string schema = take(json);
     check(contains(schema, "\"key\":\"fill_density\"") && contains(schema, "\"mode\":\"simple\""),
           "schéma : fill_density (simple)");
+    {
+        const size_t fd = schema.find("\"key\":\"fill_density\"");
+        const size_t bt = schema.find("\"key\":\"bed_temperature\"");
+        check(fd != std::string::npos && contains(schema.substr(fd, schema.find("}", fd) - fd), "\"per_object\":true"), "schéma : fill_density est un réglage par objet");
+        check(bt != std::string::npos && contains(schema.substr(bt, schema.find("}", bt) - bt), "\"per_object\":false"),
+              "schéma : bed_temperature n'est pas un réglage par objet");
+    }
     check(contains(schema, "\"key\":\"gcode_flavor\"") && contains(schema, "\"enum_values\""), "schéma : énumérations");
     std::printf("    schéma : %zu octets\n", schema.size());
+    if (std::getenv("QSID_DUMP_FIXTURES"))
+        std::ofstream(outdir + "/schema.json") << schema;
 
     std::printf("scène\n");
     check(qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err)) == QSID_OK, "import du cube", err);
@@ -459,6 +468,12 @@ int main(int argc, char **argv)
         qsid_scene_info(ctx, &json);
         si = take(json);
         check(contains(si, "\"kind\":\"modifier\"") && contains(si, "\"name\":\"box\""), "le modificateur est dans l'état");
+        if (std::getenv("QSID_DUMP_FIXTURES")) {
+            qsid_layer_range_set(ctx, oid, 5, 10, "layer_height", "0.1", err, sizeof(err));
+            qsid_scene_info(ctx, &json);
+            std::ofstream(outdir + "/scene_info_objects.json") << take(json);
+            qsid_layer_range_remove(ctx, oid, 5, 10, nullptr);
+        }
         const double gmod = slice_g("pomod.gcode");
         check(gmod > g0 + 0.3 && gmod < g100, "le modificateur ne renforce que sa zone",
               std::to_string(g0) + " < " + std::to_string(gmod) + " < " + std::to_string(g100));
@@ -468,6 +483,13 @@ int main(int argc, char **argv)
         check(gmod2 < gmod && gmod2 > g0, "plus petit = moins de filament",
               std::to_string(gmod2) + " vs " + std::to_string(gmod));
         check(qsid_object_remove_volume(ctx, oid, vid) == QSID_OK, "modificateur supprimé");
+        for (const char *shape : {"cylinder", "sphere"})
+            for (int kind : {0, 1, 2}) {
+                const int r = qsid_object_add_modifier(ctx, oid, shape, kind, mid, msize, &json, err, sizeof(err));
+                check(r == QSID_OK, std::string("volume ") + shape + " type " + std::to_string(kind), err);
+                const uint64_t extra = static_cast<uint64_t>(number_after(take(json), "\"volume_id\":"));
+                if (r == QSID_OK) check(qsid_object_remove_volume(ctx, oid, extra) == QSID_OK, "… supprimé");
+            }
         check(qsid_object_remove_volume(ctx, oid, vid) == QSID_ERR_ARG, "suppression redoublée refusée");
 
         // plage de couches : 0,1 mm entre 5 et 10 mm
@@ -480,6 +502,21 @@ int main(int argc, char **argv)
         slice_g("polr.gcode", &layers1);
         check(layers1 > layers0 + 15, "plus de couches avec la plage fine", std::to_string(layers0) + " -> " + std::to_string(layers1));
         check(qsid_layer_range_remove(ctx, oid, 5, 10, nullptr) == QSID_OK, "plage supprimée");
+
+        // une plage sans « layer_height » faisait planter le moteur (layer_height_profile_from_ranges) :
+        // le moteur complète chaque plage avec layer_height et extruder, comme le bureau.
+        check(qsid_layer_range_set(ctx, oid, 2, 6, "external_perimeter_speed", "40", err, sizeof(err)) == QSID_OK, "plage avec un seul réglage", err);
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        check(contains(si, "\"layer_height\":\"") && contains(si, "\"extruder\":\"0\""), "la plage reçoit layer_height et extruder", si.substr(si.find("layer_ranges"), 200));
+        check(qsid_layer_range_set(ctx, oid, 12, 14, nullptr, nullptr, err, sizeof(err)) == QSID_OK, "plage vide créée", err);
+        check(slice_g("polr3.gcode") > 0, "slicing avec des plages incomplètes (plus de plantage)");
+        check(qsid_layer_range_remove(ctx, oid, 2, 6, "layer_height") == QSID_OK, "« retirer » layer_height le remet par défaut");
+        qsid_scene_info(ctx, &json);
+        si = take(json);
+        check(contains(si, "\"min\":2,\"max\":6,\"config\":{\"external_perimeter_speed\":\"40\"") || contains(si, "\"layer_height\""), "layer_height toujours présent");
+        check(slice_g("polr4.gcode") > 0, "slicing après réinitialisation");
+        check(qsid_layer_range_remove(ctx, oid, 2, 6, nullptr) == QSID_OK && qsid_layer_range_remove(ctx, oid, 12, 14, nullptr) == QSID_OK, "plages supprimées");
         double layers2 = 0;
         slice_g("polr2.gcode", &layers2);
         check(std::fabs(layers2 - layers0) < 0.5, "retour au nombre de couches initial");
@@ -552,6 +589,67 @@ int main(int argc, char **argv)
         check(contains(si, "\"outside\":false"), "toujours dans le volume d'impression");
         const double gs = slice_g("posphere.gcode");
         check(gs > 0, "la sphère simplifiée se slice", std::to_string(gs));
+    }
+
+    // ---- multi-filament (QIDI Box) : plusieurs extrudeurs, un filament chacun
+    {
+        std::printf("multi-filament (QIDI Box)\n");
+        auto count_values = [](const std::string &json, const std::string &key, char sep = ',') {
+            const size_t p = json.find("\"" + key + "\":\"");
+            if (p == std::string::npos) return size_t(0);
+            const size_t end = json.find('"', p + key.size() + 4);
+            size_t n = 1;
+            for (size_t i = p + key.size() + 4; i < end; ++i) n += (json[i] == sep);
+            return n;
+        };
+        check(qsid_presets_select(ctx, "Q2 0.4 nozzle", nullptr, nullptr, &json, err, sizeof(err)) == QSID_OK, "imprimante Q2 0.4", err);
+        take(json);
+        const char *names = "[\"QIDI PLA Rapido @Q2 0.4 nozzle\",\"QIDI ABS Odorless @Q2 0.4 nozzle\",\"\"]";
+        check(qsid_presets_set_extruders(ctx, 3, names, &json, err, sizeof(err)) == QSID_OK, "3 extrudeurs", err);
+        const std::string multi = take(json);
+        std::printf("    -> %s\n", multi.c_str());
+        check(contains(multi, "\"count\":3") && contains(multi, "QIDI ABS Odorless @Q2 0.4 nozzle"), "filaments retenus", multi);
+        char *cfg = nullptr;
+        check(qsid_config_base(ctx, &cfg) == QSID_OK, "configuration multi-extrudeur");
+        const std::string base = take(cfg);
+        check(count_values(base, "nozzle_diameter") == 3, "nozzle_diameter à 3 valeurs", std::to_string(count_values(base, "nozzle_diameter")));
+        check(count_values(base, "filament_colour", ';') == 3, "filament_colour à 3 valeurs", std::to_string(count_values(base, "filament_colour", ';')));
+        check(count_values(base, "temperature") == 3, "temperature à 3 valeurs");
+        check(count_values(base, "wiping_volumes_matrix") == 9, "matrice de purge 3×3", std::to_string(count_values(base, "wiping_volumes_matrix")));
+
+        check(qsid_presets_set_extruders(ctx, 0, names, &json, err, sizeof(err)) == QSID_ERR_ARG, "0 extrudeur refusé");
+        check(qsid_presets_set_extruders(ctx, 17, names, &json, err, sizeof(err)) == QSID_ERR_ARG, "17 extrudeurs refusés");
+        check(qsid_presets_set_extruders(ctx, 2, "pas du json", &json, err, sizeof(err)) == QSID_ERR_ARG, "JSON invalide refusé");
+
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
+        qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err));
+        const uint64_t a = first_id(take(json));
+        qsid_scene_add(ctx, cube.c_str(), &json, err, sizeof(err));
+        const uint64_t b = first_id(take(json));
+        check(qsid_object_config_set(ctx, a, 0, "extruder", "1", err, sizeof(err)) == QSID_OK, "objet A : extrudeur 1", err);
+        check(qsid_object_config_set(ctx, b, 0, "extruder", "2", err, sizeof(err)) == QSID_OK, "objet B : extrudeur 2", err);
+        char *summary = nullptr;
+        const int rc = qsid_slice_scene(ctx, (outdir + "/multi.gcode").c_str(), nullptr, nullptr, &summary, err, sizeof(err));
+        check(rc == QSID_OK, "slicing multi-filament", err);
+        const std::string sm = take(summary);
+        check(number_after(sm, "\"toolchanges\":") >= 1, "changement d'outil compté", sm.substr(0, 200));
+        size_t t1 = 0;
+        {
+            std::ifstream in(outdir + "/multi.gcode");
+            std::string line;
+            while (std::getline(in, line)) if (line == "T1") ++t1;
+        }
+        check(t1 >= 1, "le G-code appelle l'outil T1", std::to_string(t1));
+        // le choix survit à un changement d'imprimante
+        check(qsid_presets_select(ctx, "Q2 0.6 nozzle", nullptr, nullptr, &json, err, sizeof(err)) == QSID_OK, "autre buse", err);
+        take(json);
+        qsid_config_base(ctx, &cfg);
+        check(count_values(take(cfg), "nozzle_diameter") == 3, "3 extrudeurs conservés après le changement d'imprimante");
+        check(qsid_presets_set_extruders(ctx, 1, nullptr, &json, err, sizeof(err)) == QSID_OK, "retour à un seul extrudeur", err);
+        take(json);
+        qsid_config_base(ctx, &cfg);
+        check(count_values(take(cfg), "nozzle_diameter") == 1, "nozzle_diameter à 1 valeur");
+        check(qsid_scene_clear(ctx) == QSID_OK, "scène vidée");
     }
 
     std::printf("scène vide\n");

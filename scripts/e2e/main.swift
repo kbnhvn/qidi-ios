@@ -29,6 +29,7 @@ func waitUntil(_ timeout: Double = 120, _ label: String, _ condition: () -> Bool
 
 @MainActor
 func run() async -> Int32 {
+    setvbuf(stdout, nil, _IONBF, 0)   // la sortie reste lisible si le programme plante
     let env = ProcessInfo.processInfo.environment
     guard let resources = env["QSID_RESOURCES_DIR"], let config = env["QSID_CONFIG_DIR"], let out = env["QSID_E2E_OUT"] else {
         print("variables attendues : QSID_RESOURCES_DIR, QSID_CONFIG_DIR, QSID_E2E_OUT, QSID_TESTDATA")
@@ -163,6 +164,101 @@ func run() async -> Int32 {
     model.deleteSelected()
     _ = await waitUntil(30, "suppression du petit cube") { model.scene?.objects.count == 1 }
 
+    print("multi-sélection")
+    model.importModel(from: testdata.appendingPathComponent("cube_20mm.stl"))
+    _ = await waitUntil(30, "second cube") { model.scene?.objects.count == 2 }
+    check(model.scene?.objects.count == 2, "second cube importé")
+    model.selectAll()
+    check(model.selectedObjectIDs.count == 2 && model.hasMultipleSelected, "⌘A sélectionne tous les objets")
+    let xs0 = model.scene!.objects.map { $0.instances[0].offset[0] }
+    model.nudgeSelected(dx: 5, dy: 0)
+    _ = await waitUntil(30, "pas de groupe") { model.scene!.objects.map { $0.instances[0].offset[0] } != xs0 }
+    let xs1 = model.scene!.objects.map { $0.instances[0].offset[0] }
+    check(zip(xs0, xs1).allSatisfy { abs($1 - $0 - 5) < 1e-6 }, "le groupe bouge d'un bloc", "\(xs0) -> \(xs1)")
+    model.undo()
+    _ = await waitUntil(30, "annulation de groupe") { model.scene!.objects.map { $0.instances[0].offset[0] } == xs0 }
+    check(model.scene!.objects.map { $0.instances[0].offset[0] } == xs0, "un seul « annuler » ramène tout le groupe")
+    let second = model.scene!.objects[1].id
+    model.toggleSelection(second)
+    check(model.selectedObjectIDs == [keep] && model.selectedObjectID == keep, "retirer un objet de la sélection")
+    model.toggleSelection(second)
+    check(model.selectedObjectIDs.count == 2 && model.selectedObjectID == second, "ajouter un objet à la sélection")
+    model.selectedObjectID = second
+    check(model.selectedObjectIDs == [second], "choisir un objet remplace la sélection")
+    model.deleteSelected()
+    _ = await waitUntil(30, "suppression du second") { model.scene?.objects.count == 1 }
+    check(model.scene?.objects.map(\.id) == [keep] && model.selectedObjectIDs.isEmpty, "suppression de la sélection")
+    model.selectedObjectID = keep
+
+    print("réglages par objet")
+    func object() -> SceneObject? { model.scene?.objects.first { $0.id == keep } }
+    model.setObjectOption("fill_density", "100%", objectID: keep)
+    _ = await waitUntil(30, "réglage d'objet") { object()?.config["fill_density"] != nil }
+    check(object()?.config["fill_density"] == "100%" && model.isObjectOptionModified("fill_density", objectID: keep),
+          "réglage d'objet enregistré par le moteur")
+    check(model.objectValue(of: "fill_density", objectID: keep) == "100%", "valeur effective de l'objet")
+    check(model.objectValue(of: "perimeters", objectID: keep) == model.value(of: "perimeters"), "sinon la valeur globale")
+    check(object()?.hasCustomSettings == true, "l'objet est signalé comme personnalisé")
+    model.addModifier(objectID: keep, shape: .cylinder, kind: .modifier)
+    _ = await waitUntil(30, "modificateur") { object()?.modifiers.count == 1 }
+    let mod = object()!.modifiers[0]
+    check(mod.name == "cylinder" && mod.kind == "modifier", "modificateur cylindre ajouté")
+    model.setObjectOption("perimeters", "6", objectID: keep, volumeID: mod.id)
+    _ = await waitUntil(30, "réglage du modificateur") { object()?.modifiers.first?.config["perimeters"] != nil }
+    check(object()?.modifiers.first?.config["perimeters"] == "6", "réglage du modificateur")
+    model.updateModifier(objectID: keep, volumeID: mod.id, centerWorld: nil, size: [5, 5, 5])
+    _ = await waitUntil(30, "taille du modificateur") { object()?.modifiers.first?.size == [5, 5, 5] }
+    check(object()?.modifiers.first?.size == [5, 5, 5], "modificateur redimensionné")
+    model.addModifier(objectID: keep, shape: .box, kind: .supportBlocker)
+    _ = await waitUntil(30, "bloqueur") { object()?.modifiers.count == 2 }
+    check(object()?.modifiers.last?.kind == "blocker", "bloqueur de supports ajouté")
+    model.addLayerRange(objectID: keep)
+    _ = await waitUntil(30, "plage") { object()?.layerRanges.count == 1 }
+    check(object()?.layerRanges.first?.config["layer_height"] != nil, "plage de hauteurs créée avec la hauteur de couche")
+    let range = object()!.layerRanges[0]
+    model.moveLayerRange(objectID: keep, from: range, minZ: 2, maxZ: 8)
+    _ = await waitUntil(30, "plage déplacée") { object()?.layerRanges.first?.min == 2 }
+    check(object()?.layerRanges.first?.max == 8 && object()?.layerRanges.first?.config["layer_height"] != nil,
+          "bornes changées, réglages conservés")
+    model.slice()
+    _ = await waitUntil(300, "slicing avec réglages d'objet") { !model.isSlicing && model.output != nil }
+    check(model.output != nil && model.errorMessage == nil, "l'objet personnalisé se slice", model.errorMessage ?? "")
+    model.resetObjectOption(nil, objectID: keep)
+    for volume in object()!.modifiers { model.removeModifier(objectID: keep, volumeID: volume.id) }
+    model.removeLayerRange(objectID: keep, minZ: 2, maxZ: 8)
+    _ = await waitUntil(30, "nettoyage") { object()?.hasCustomSettings == false }
+    check(object()?.hasCustomSettings == false, "réglages, modificateurs et plages retirés")
+
+    print("coupe et simplification")
+    model.beginCut()
+    check(model.cutPlane?.axis == .z && abs((model.cutPlane?.position ?? 0) - 10) < 1e-6, "plan de coupe au milieu de l'objet")
+    model.applyCut(keep: .both, placeOnCut: false)
+    _ = await waitUntil(60, "coupe") { model.scene?.objects.count == 2 }
+    check(model.scene?.objects.count == 2 && model.cutPlane == nil, "la coupe donne deux objets")
+    let heights = model.scene!.objects.map { $0.instances[0].size[2] }
+    check(heights.allSatisfy { abs($0 - 10) < 0.05 }, "deux moitiés de 10 mm", "\(heights)")
+    check(model.selectedObjectIDs.count == 2, "les moitiés sont sélectionnées")
+    check(model.scene?.hasObjectOutsideBed == false, "les moitiés sont dans le volume d'impression")
+    model.beginCut(axis: .x)
+    model.applyCut(keep: .upper, placeOnCut: true)
+    _ = await waitUntil(60, "seconde coupe") { model.scene?.objects.count == 2 && model.cutPlane == nil && model.selectedObjectIDs.count == 1 }
+    check(model.scene?.objects.count == 2, "coupe verticale en gardant un côté : un objet remplacé par un seul")
+    model.clearScene()
+    _ = await waitUntil(30, "plateau vidé") { model.scene?.objects.isEmpty == true }
+    model.importModel(from: testdata.appendingPathComponent("sphere_r10.stl"))
+    _ = await waitUntil(60, "sphère") { model.scene?.objects.count == 1 }
+    let sphere = model.scene!.objects[0]
+    model.simplify(objectID: sphere.id, ratio: 0.25)
+    _ = await waitUntil(120, "simplification") { (model.scene?.objects.first?.triangles ?? Int.max) < sphere.triangles }
+    check((model.scene?.objects.first?.triangles ?? Int.max) < sphere.triangles / 2, "maillage simplifié",
+          "\(sphere.triangles) -> \(model.scene?.objects.first?.triangles ?? -1)")
+    check(model.meshes[sphere.id]?.count == (model.scene?.objects.first?.triangles ?? -1) * 9, "le maillage affiché suit la simplification")
+    model.clearScene()
+    _ = await waitUntil(30, "plateau vidé 2") { model.scene?.objects.isEmpty == true }
+    model.importModel(from: testdata.appendingPathComponent("cube_20mm.stl"))
+    _ = await waitUntil(30, "cube de reprise") { model.scene?.objects.count == 1 }
+    model.selectedObjectID = model.scene?.objects.first?.id
+
     print("réglages")
     var infill15 = 0.0, infill40 = 0.0
     do {
@@ -196,13 +292,34 @@ func run() async -> Int32 {
     model.overrides.setAdhesion(.brim, base: model.baseConfig)
     check(model.overrides.supportMode(base: model.baseConfig) == .buildPlateOnly, "supports : sur le plateau uniquement")
     check(model.overrides.summary(base: model.baseConfig)?.contains("brim") == true, "résumé des réglages")
+    let parentPrint = model.selection.print
     model.saveUserPreset(named: "Mon essai")
     check(model.userPresets.keys.contains("Mon essai"), "préréglage enregistré")
+    check(model.userPresets["Mon essai"]?.print == parentPrint && model.userPresets["Mon essai"]?.printer == model.selection.printer
+          && model.userPresets["Mon essai"]?.filament == model.selection.filament, "il mémorise ses presets parents")
+    check(model.activeUserPreset == "Mon essai" && !model.isUserPresetModified, "préréglage actif, non modifié")
+    model.overrides.setInfillPercent(60, base: model.baseConfig)
+    check(model.isUserPresetModified, "un réglage changé est signalé « modifié »")
+    model.updateActiveUserPreset()
+    check(!model.isUserPresetModified && model.userPresets["Mon essai"]?.overrides.infillPercent(base: model.baseConfig) == 60, "« mettre à jour » enregistre")
+    let otherPrint = model.printPresets.first { $0 != parentPrint }
+    check(otherPrint != nil, "un autre preset d'impression existe")
+    if let otherPrint {
+        model.selectPrint(otherPrint)
+        _ = await waitUntil(60, "autre preset") { model.selection.print == otherPrint }
+        check(model.isUserPresetModified, "changer le preset parent est signalé")
+    }
     model.overrides.resetAll()
     check(model.overrides.isEmpty, "réglages remis au preset")
     model.applyUserPreset("Mon essai")
-    check(model.overrides.supportMode(base: model.baseConfig) == .buildPlateOnly, "préréglage rappelé")
+    _ = await waitUntil(60, "rappel") { model.selection.print == parentPrint && model.overrides.infillPercent(base: model.baseConfig) == 60 }
+    check(model.selection.print == parentPrint, "rappeler le préréglage rétablit le preset parent", model.selection.print)
+    check(model.overrides.infillPercent(base: model.baseConfig) == 60, "… et ses réglages")
+    check(!model.isUserPresetModified, "rappelé : plus modifié")
+    check(model.saveUserPreset(named: "Mon essai", replacing: false) == "Mon essai 2", "« enregistrer sous » ne remplace pas")
+    model.deleteUserPreset("Mon essai 2")
     model.deleteUserPreset("Mon essai")
+    check(model.userPresets.isEmpty && model.activeUserPreset == nil, "préréglages supprimés")
     model.overrides.resetAll()
 
     L10n.language = "fr"
@@ -246,6 +363,74 @@ func run() async -> Int32 {
         _ = await waitUntil(15, "état après envoi") { model.printerStatus?.state == "printing" }
         check(model.printerStatus?.state == "printing" && model.printerStatus?.progress == 0.5, "état : impression en cours à 50 %")
         _ = sawProgress   // la progression est un événement rapide : on ne l'exige pas sur un envoi local
+
+        print("découverte des imprimantes")
+        model.startDiscovery(hosts: ["127.0.0.1", "192.0.2.1"], port: port)
+        check(model.isDiscovering, "recherche en cours")
+        _ = await waitUntil(60, "découverte") { !model.isDiscovering }
+        check(model.discoveredPrinters.count == 1, "une imprimante trouvée (l'autre adresse ne répond pas)", "\(model.discoveredPrinters)")
+        let found = model.discoveredPrinters.first
+        check(found?.host == "127.0.0.1" && found?.port == port, "adresse et port", "\(String(describing: found))")
+        check(found?.hostname == "qidi-mock" && found?.version == "v0.8.0-test" && found?.klippyState == "ready", "nom d'hôte, version, état Klipper")
+        model.moonraker = MoonrakerConfig(host: "", port: 7125, apiKey: "secret-test")
+        if let found { model.usePrinter(found) }
+        check(model.moonraker.host == "127.0.0.1" && model.moonraker.port == port && model.moonraker.apiKey == "secret-test",
+              "« utiliser » reprend l'adresse et garde la clé API")
+        model.startDiscovery(hosts: ["192.0.2.1"], port: port)
+        _ = await waitUntil(30, "recherche vide") { !model.isDiscovering }
+        check(model.discoveredPrinters.isEmpty, "aucune imprimante sur une adresse qui ne répond pas")
+
+        print("multi-filament et QIDI Box")
+        model.setExtruderCount(3)
+        _ = await waitUntil(60, "3 filaments") { model.extruderFilaments.count == 3 }
+        check(model.isMultiFilament && model.extruderCount == 3, "3 extrudeurs")
+        check(model.baseConfig["nozzle_diameter"]?.split(separator: ",").count == 3, "la configuration suit : 3 buses", model.baseConfig["nozzle_diameter"] ?? "nil")
+        check(model.filamentColors.count == 3, "3 couleurs de filament")
+        let other = model.filamentPresets.first { $0 != model.selection.filament && $0.contains("ABS") } ?? model.filamentPresets.last!
+        model.setExtruderFilament(1, other)
+        _ = await waitUntil(60, "filament T2") { model.extruderFilaments.count == 3 && model.extruderFilaments[1] == other }
+        check(model.extruderFilaments[1] == other, "filament du deuxième extrudeur", "\(model.extruderFilaments)")
+        model.setFilamentColor(2, hex: "#FF0000")
+        _ = await waitUntil(30, "couleur T3") { model.filamentColors.count == 3 && model.filamentColors[2] == "#FF0000" }
+        check(model.filamentColors[2] == "#FF0000", "couleur du troisième filament", "\(model.filamentColors)")
+        model.importModel(from: testdata.appendingPathComponent("cube_20mm.stl"))
+        _ = await waitUntil(30, "second cube multi") { (model.scene?.objects.count ?? 0) >= 2 }
+        let second2 = model.scene!.objects.last!.id
+        model.setObjectOption("extruder", "2", objectID: second2)
+        _ = await waitUntil(30, "extrudeur de l'objet") { model.scene?.objects.last?.config["extruder"] == "2" }
+        check(model.scene?.objects.last?.config["extruder"] == "2", "objet affecté au deuxième filament")
+        model.slice()
+        _ = await waitUntil(300, "slicing multi-filament") { !model.isSlicing && model.output != nil && !model.resultIsStale }
+        check(model.errorMessage == nil && model.summary != nil, "slicing multi-filament", model.errorMessage ?? "")
+        check(model.usedExtruders.contains(0) && model.usedExtruders.contains(1), "les deux outils sont utilisés", "\(model.usedExtruders)")
+        check((model.summary?.toolchanges ?? 0) >= 1, "changement d'outil compté", "\(String(describing: model.summary?.toolchanges))")
+        model.colorMode = .tool
+        _ = await waitUntil(60, "aperçu par outil") { model.gcodeMesh != nil && model.gcodeMesh?.valueRange == nil }
+        check(model.gcodeMesh != nil, "aperçu coloré par filament")
+
+        model.useBox = true
+        model.boxSlots = [4, 5, 6]
+        let before = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: journalPath)))) as? [String: Any]
+        let startedBefore = (before?["started"] as? [String])?.count ?? 0
+        model.uploadAndPrint()
+        _ = await waitUntil(60, "envoi multi") { model.uploadStatus == "Impression lancée." && ((try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: journalPath)))) as? [String: Any]).flatMap { ($0["started"] as? [String])?.count } ?? 0 > startedBefore }
+        let after = (try? JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: journalPath)))) as? [String: Any]
+        let scripts = after?["scripts"] as? [String] ?? []
+        check(scripts.first == "SAVE_VARIABLE VARIABLE=enable_box VALUE=1", "le Box est activé avant le démarrage", "\(scripts)")
+        check(scripts.contains(#"SAVE_VARIABLE VARIABLE=value_t0 VALUE=\"'slot4'\""#) && scripts.contains(#"SAVE_VARIABLE VARIABLE=value_t2 VALUE=\"'slot6'\""#),
+              "chaque outil est associé à son emplacement", "\(scripts)")
+        let vars = after?["variables"] as? [String: Any] ?? [:]
+        check(vars["enable_box"] as? Int == 1 && vars["value_t1"] as? String == "'slot5'", "variables Klipper enregistrées", "\(vars)")
+        model.boxSlots = [0, 0, 0]
+        model.useBox = false
+        model.readBoxFromPrinter()
+        _ = await waitUntil(30, "lecture du Box") { model.boxSlots == [4, 5, 6] }
+        check(model.boxSlots == [4, 5, 6] && model.useBox, "association relue depuis l'imprimante", "\(model.boxSlots)")
+        model.setExtruderCount(1)
+        _ = await waitUntil(60, "retour mono-filament") { !model.isMultiFilament }
+        check(!model.isMultiFilament && model.baseConfig["nozzle_diameter"]?.contains(",") == false, "retour à un seul filament")
+        model.useBox = false
+        model.colorMode = .featureType
     } else {
         print("  (ignoré : QSID_MOCK_MOONRAKER absent)")
     }
@@ -307,6 +492,56 @@ func run() async -> Int32 {
     _ = await waitUntil(30, "fin de calibration") { model.calibration == nil && (model.scene?.objects.isEmpty ?? false) }
     check(model.calibration == nil && model.scene?.objects.isEmpty == true, "fin de calibration : plateau vidé")
     check(!model.overrides.isModified("before_layer_gcode"), "fin de calibration : réglages d'origine restaurés")
+
+    print("calibration — Pressure Advance ligne / motif, débit volumétrique")
+    for (label, kind, expectedLines) in [
+        ("ligne", CalibrationKind.pressureAdvanceLine(start: 0, end: 0.04, step: 0.002), 21),
+        ("motif", CalibrationKind.pressureAdvancePattern(start: 0, end: 0.04, step: 0.004), 11),
+    ] {
+        model.startCalibration(kind)
+        _ = await waitUntil(60, "PA \(label)") { model.calibration != nil && model.scene?.objects.count == 1 && !model.calibrationLegend.isEmpty }
+        check(model.calibrationLegend.count == expectedLines, "PA \(label) : une valeur par \(label == "ligne" ? "ligne" : "chevron")", "\(model.calibrationLegend.count)")
+        if let base = model.scene?.objects.first?.instances.first {
+            check(abs(base.size[0] - 25) < 0.05, "PA \(label) : base de 25 mm de large", "\(base.size)")
+            check(abs(base.size[2] - 0.2) < 0.01, "PA \(label) : base d'une couche", "\(base.size[2])")
+            check(!base.outside, "PA \(label) : base dans le volume d'impression")
+            check(base.size[1] > 40, "PA \(label) : base assez longue pour toutes les valeurs", "\(base.size[1])")
+        }
+        check(model.overrides.isModified("end_gcode") && model.overrides.isModified("perimeter_generator"), "PA \(label) : G-code de fin et Arachne")
+        model.slice()
+        _ = await waitUntil(300, "slicing PA \(label)") { model.output != nil && !model.isSlicing && !model.resultIsStale }
+        check(model.errorMessage == nil && model.output != nil, "PA \(label) : slicing", model.errorMessage ?? "")
+        let text = (try? String(contentsOf: model.output!.url, encoding: .utf8)) ?? ""
+        let ks = Set(text.split(separator: "\n").filter { $0.hasPrefix("M900 K") }.compactMap { Double($0.dropFirst(6)) })
+        check(ks.count >= expectedLines, "PA \(label) : \(expectedLines) valeurs de K dans le G-code", "\(ks.count)")
+        model.endCalibration()
+        _ = await waitUntil(30, "fin PA \(label)") { model.calibration == nil && (model.scene?.objects.isEmpty ?? false) }
+    }
+
+    model.startCalibration(.maxVolumetricSpeed(start: 5, end: 12, step: 0.5))
+    _ = await waitUntil(60, "débit volumétrique") { model.calibration != nil && (model.scene?.objects.first?.layerRanges.count ?? 0) > 0 }
+    if let wall = model.scene?.objects.first {
+        check(wall.layerRanges.count == 14, "débit volumétrique : 14 plages de hauteurs (15 valeurs)", "\(wall.layerRanges.count)")
+        check(abs((wall.instances.first?.size[2] ?? 0) - 15 * 0.32) < 0.02, "débit volumétrique : mur de 15 couches de 0,32 mm", "\(String(describing: wall.instances.first?.size))")
+        let speeds = wall.layerRanges.compactMap { $0.config["external_perimeter_speed"].flatMap(Double.init) }
+        check(speeds.count == 14 && zip(speeds, speeds.dropFirst()).allSatisfy { $0 < $1 }, "vitesses du périmètre externe croissantes", "\(speeds)")
+    }
+    check(model.overrides.isModified("layer_height") && model.value(of: "layer_height") == "0.32", "hauteur de couche = 0,8 × la buse")
+    model.slice()
+    _ = await waitUntil(300, "slicing débit volumétrique") { model.output != nil && !model.isSlicing && !model.resultIsStale }
+    check(model.errorMessage == nil && model.output != nil, "débit volumétrique : slicing", model.errorMessage ?? "")
+    check(abs((model.summary?.layers ?? 0) - 15) <= 1, "débit volumétrique : ≈ 15 couches", "\(String(describing: model.summary?.layers))")
+    let vsText = (try? String(contentsOf: model.output!.url, encoding: .utf8)) ?? ""
+    var inExternal = false
+    var feedrates = Set<Double>()
+    for line in vsText.split(separator: "\n") {
+        if line.hasPrefix(";TYPE:") { inExternal = line == ";TYPE:External perimeter" }
+        else if inExternal, line.hasPrefix("G1 "), let f = line.split(separator: " ").first(where: { $0.hasPrefix("F") }), let v = Double(f.dropFirst()) { feedrates.insert(v) }
+    }
+    check(feedrates.count >= 10, "débit volumétrique : la vitesse change de couche en couche", "\(feedrates.count) vitesses")
+    model.endCalibration()
+    _ = await waitUntil(30, "fin débit volumétrique") { model.calibration == nil && (model.scene?.objects.isEmpty ?? false) }
+    check(model.calibrationLegend.isEmpty && !model.overrides.isModified("layer_height"), "fin : réglages restaurés")
 
     print(failures == 0 ? "e2e: OK" : "e2e: \(failures) ÉCHEC(S)")
     return failures == 0 ? 0 : 1

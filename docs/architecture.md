@@ -155,7 +155,7 @@ capturées dans `ios/QSlicerKit/Tests/QSlicerKitTests/Fixtures/engine/` et déco
 
 | Couche | Contenu | Où c'est vérifié |
 |---|---|---|
-| `Core/*.swift` (Foundation seul) | géométrie du plateau et caméra, maillage du G-code, options, catalogue des réglages, filaments, calibration, Moonraker, types JSON | `ios/QSlicerKit` : `swift test` sous Linux (47 tests) |
+| `Core/*.swift` (Foundation seul) | géométrie du plateau et caméra, maillage du G-code, options, catalogue des réglages, filaments, calibrations (tour, ligne, motif, débit, débit volumétrique), plan de coupe, réglages par objet, sélection de groupe, QIDI Box, préréglages, découverte réseau, Moonraker, types JSON | `ios/QSlicerKit` : `swift test` sous Linux (82 tests) |
 | `QSlicerCore` + `SlicerModel` | pont C, file série du moteur, état | `scripts/typecheck-swift.sh` : types avec le vrai en-tête C |
 | `Screens/*.swift`, `BedSceneView`, `GCodeSceneView`, `ThumbnailRenderer` | SwiftUI / SceneKit / UIKit | analyse syntaxique sous Linux ; compilation par la CI `ios-app` ; recette iPad |
 
@@ -164,3 +164,40 @@ Le paquet `QSlicerKit` ne duplique rien : ses sources sont des liens symboliques
 Le modèle reçoit ses chemins par `SlicerLocations` (bundle dans l'app, dossiers temporaires dans les
 tests) : c'est ce qui permet à `scripts/e2e-linux.sh` de faire tourner le vrai `SlicerModel` contre le vrai
 moteur (voir `docs/audit-ui-slicing.md`, « Test de bout en bout »).
+
+### 13. ABI v3.1 : outils d'objet, multi-filament
+
+Ajouts à `core/src/scene.cpp`, tous au-dessus de classes que le bureau utilise déjà :
+
+| Fonction | Ce qu'elle appelle | Remarques |
+|---|---|---|
+| `qsid_scene_cut` | `Cut(...).perform_with_plane()` (`CutUtils`) | même matrice de coupe que `GLGizmoCut3D::get_cut_matrix` ; refuse un plan qui ne traverse pas l'objet ; les moitiés sont replacées sur le plateau sans chevauchement |
+| `qsid_scene_simplify` | `its_quadric_edge_collapse` | par volume « pièce » ; `set_mesh` + `calculate_convex_hull`, comme `GLGizmoSimplify` |
+| `qsid_object_config_set/reset` | `ModelObject::config` / `ModelVolume::config` | seules les options de `PrintObjectConfig` / `PrintRegionConfig` (+ `extruder`) sont acceptées ; le schéma les marque `"per_object":true` |
+| `qsid_object_add_modifier`, `_set_modifier`, `_remove_volume` | `ModelObject::add_volume(mesh, type)` | formes unitaires (boîte, cylindre, sphère) mises à l'échelle ; types modificateur / bloqueur / forceur de supports |
+| `qsid_layer_range_set/remove` | `ModelObject::layer_config_ranges` | refuse les chevauchements ; **chaque plage reçoit `layer_height` et `extruder`** (sans eux `layer_height_profile_from_ranges` déréférence un pointeur nul — bug trouvé par le test de bout en bout) |
+| `qsid_presets_set_extruders` | `Preset::set_num_extruders`, `update_multi_material_filament_presets`, `set_filament_preset` | 1 à 16 extrudeurs (QIDI Box) ; le choix est mémorisé dans `ctx->extruder_filaments` et réappliqué à chaque changement d'imprimante ; `full_config()` bascule alors sur la lecture « un filament par extrudeur » |
+
+`qsid_scene_info` expose pour chaque objet `config`, `volumes` (pièces et modificateurs avec position, taille et
+réglages) et `layer_ranges`. Côté Swift : `CutPlane`, `ObjectSettings`, `SelectionGroup` (logique pure), et dans
+`SlicerModel` une sélection multiple (`selectedObjectIDs`), un historique d'annulation par **groupe** de
+transformations, les opérations de coupe / simplification / réglages, et le multi-filament.
+
+**QIDI Box.** Ce que le bureau envoie à l'imprimante avant un job (`Plater`) est reproduit à l'identique :
+`SAVE_VARIABLE VARIABLE=enable_box VALUE=1|0` puis `SAVE_VARIABLE VARIABLE=value_t<n> VALUE=\"'slot<k>'\"` par outil
+(`QIDIBox.activationCommands`, envoyées par `POST /printer/gcode/script`). La **lecture automatique** du contenu du
+Box passe par `QIDINetwork::get_box_info`, un module fermé absent des sources : elle n'est pas portée, les
+emplacements se règlent à la main (et se relisent depuis les variables Klipper `save_variables`). La numérotation des
+emplacements (0…15 = 1A…4D) suit l'ordre des plateaux du bureau ; elle reste à confirmer sur un vrai Box.
+
+**Calibrations.** `Calibration.plan` couvre désormais tour / ligne / motif de Pressure Advance, débit grossier et fin,
+et débit volumétrique maximal (plages de hauteurs avec `external_perimeter_speed` croissante, comme
+`Plater::calib_max_volumetric_speed`). Ligne et motif génèrent leur G-code en Swift (`CalibrationGCode`, port de
+`calib_pa_line` / `calib_pa_pattern`) et le placent à la fin du G-code de l'imprimante ; seules les étiquettes
+numériques (maillage de texte) sont remplacées par une légende dans l'app.
+
+**Découverte des imprimantes.** `PrinterDiscovery` balaie les sous-réseaux des interfaces actives (au plus un /22) en
+sondant `GET /server/info` — seul un vrai Moonraker répond avec `moonraker_version` — et `BonjourBrowser`
+(`_moonraker._tcp`, `_http._tcp`) accélère la recherche. Info.plist déclare `NSBonjourServices` et la raison de
+l'accès au réseau local.
+

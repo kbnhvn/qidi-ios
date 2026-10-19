@@ -71,6 +71,9 @@ struct qsid_ctx {
     Slic3r::DynamicPrintConfig               base_config;
     bool                                     base_from_ini = false;
     std::map<std::string, std::string>       overrides;
+    /* Filament de chaque extrudeur (impression multi-couleur / QIDI Box) ; vide ou 1 élément =
+     * un seul extrudeur. Réappliqué quand on change de preset. */
+    std::vector<std::string>                 extruder_filaments;
     /* Print du dernier slicing : Print::apply n'invalide que ce qui change. */
     std::unique_ptr<Slic3r::Print>           print;
     Slic3r::GCodeProcessorResult             last_result;

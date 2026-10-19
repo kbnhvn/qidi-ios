@@ -17,8 +17,13 @@ struct PrepareCanvas: View {
 
             VStack(spacing: 8) {
                 banners
+                if !model.calibrationLegend.isEmpty { CalibrationLegend() }
                 Spacer()
-                if model.selectedObject != nil { SelectionBar() }
+                if model.cutPlane != nil {
+                    CutPanel()
+                } else if model.selectedObject != nil {
+                    SelectionBar()
+                }
             }
             .padding(10)
 
@@ -48,7 +53,7 @@ struct PrepareCanvas: View {
     ]
 
     /// Raccourcis clavier (clavier matériel iPad) : ⌥+flèches = 1 mm (⌥⇧ : 10 mm), ⌘D copie,
-    /// ⇧⌘A organise. Les modificateurs évitent de gêner la saisie dans les champs numériques.
+    /// ⌘A tout sélectionner, ⇧⌘A organise, Échap désélectionne. Les modificateurs évitent de gêner la saisie dans les champs numériques.
     private var shortcuts: some View {
         Group {
             ForEach(Self.nudges) { n in
@@ -59,6 +64,8 @@ struct PrepareCanvas: View {
             }
             Button("") { model.duplicateSelected() }.keyboardShortcut("d", modifiers: [.command])
             Button("") { model.arrange() }.keyboardShortcut("a", modifiers: [.command, .shift])
+            Button("") { model.selectAll() }.keyboardShortcut("a", modifiers: [.command])
+            Button("") { model.clearSelection() }.keyboardShortcut(.escape, modifiers: [])
         }
         .opacity(0)
         .frame(width: 0, height: 0)
@@ -160,6 +167,31 @@ struct Banner: View {
     }
 }
 
+/// Aide à la lecture d'une calibration : valeur de chaque ligne, formule du débit…
+struct CalibrationLegend: View {
+    @EnvironmentObject private var model: SlicerModel
+    @State private var expanded = true
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(model.calibrationLegend.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.system(.footnote, design: .monospaced))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 160)
+        } label: {
+            Label(L10n.t("Lecture du résultat"), systemImage: "list.number").font(.callout.bold())
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: 520)
+    }
+}
+
 /// Vues prédéfinies de la caméra.
 struct ViewControls: View {
     @EnvironmentObject private var model: SlicerModel
@@ -184,44 +216,69 @@ struct ViewControls: View {
     }
 }
 
-/// Actions sur l'objet sélectionné.
+/// Actions sur l'objet (ou le groupe d'objets) sélectionné.
 struct SelectionBar: View {
     @EnvironmentObject private var model: SlicerModel
 
     var body: some View {
         if let object = model.selectedObject {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    action("plus.square.on.square", L10n.t("Dupliquer")) {
-                        model.setInstanceCount(object.instances.count + 1, objectID: object.id)
-                    }
-                    action("square.3.layers.3d.down.forward", L10n.t("Poser sur une face"), active: model.layOnFaceMode) {
-                        model.layOnFaceMode.toggle()
-                    }
-                    action("arrow.down.to.line", L10n.t("Poser sur le plateau")) { model.dropToBed(object.id) }
-                    action("dot.viewfinder", L10n.t("Centrer")) {
-                        if let bed = model.scene?.bed, let inst = object.instances.first {
-                            model.transform(objectID: object.id,
-                                            offset: [(bed.minX + bed.maxX) / 2, (bed.minY + bed.maxY) / 2, inst.offset[2]])
-                        }
-                    }
-                    action("arrow.counterclockwise", L10n.t("Orientation d'origine")) { model.resetRotation(object.id) }
-                    action("square.grid.3x3.square", L10n.t("Organiser")) { model.arrange() }
-                    action("trash", L10n.t("Supprimer"), role: .destructive) { model.deleteSelected() }
-                        .keyboardShortcut(.delete, modifiers: [])
+            let group = model.hasMultipleSelected
+            VStack(spacing: 4) {
+                if group {
+                    Text(String(format: L10n.t("%ld objets sélectionnés"), model.selectedObjectIDs.count))
+                        .font(.caption.bold())
+                        .padding(.horizontal, 10).padding(.vertical, 3)
+                        .background(.regularMaterial, in: Capsule())
                 }
-                .padding(6)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        action("plus.square.on.square", L10n.t("Dupliquer")) { model.duplicateSelected() }
+                        if !group {
+                            action("square.3.layers.3d.down.forward", L10n.t("Poser sur une face"), active: model.layOnFaceMode) {
+                                model.layOnFaceMode.toggle()
+                            }
+                        }
+                        action("arrow.down.to.line", L10n.t("Poser sur le plateau")) { model.dropSelectedToBed() }
+                        if !group {
+                            action("dot.viewfinder", L10n.t("Centrer")) {
+                                if let bed = model.scene?.bed, let inst = object.instances.first {
+                                    model.transform(objectID: object.id,
+                                                    offset: [(bed.minX + bed.maxX) / 2, (bed.minY + bed.maxY) / 2, inst.offset[2]])
+                                }
+                            }
+                        }
+                        action("arrow.counterclockwise", L10n.t("Orientation d'origine")) { model.resetRotationOfSelection() }
+                        if !group {
+                            action("scissors", L10n.t("Couper")) { model.beginCut() }
+                            action("square.3.layers.3d.down.right", L10n.t("Simplifier")) { model.activeTool = .simplify(object.id) }
+                            action("slider.horizontal.3", L10n.t("Réglages de l'objet"), badge: object.hasCustomSettings) {
+                                model.activeTool = .settings(object.id)
+                            }
+                        }
+                        action("checkmark.circle", L10n.t("Sélection multiple"), active: model.multiSelectMode) {
+                            model.multiSelectMode.toggle()
+                        }
+                        action("square.dashed.inset.filled", L10n.t("Tout sélectionner")) { model.selectAll() }
+                        action("square.grid.3x3.square", L10n.t("Organiser")) { model.arrange() }
+                        action("trash", L10n.t("Supprimer"), role: .destructive) { model.deleteSelected() }
+                            .keyboardShortcut(.delete, modifiers: [])
+                    }
+                    .padding(6)
+                }
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .frame(maxWidth: 640)
             }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .frame(maxWidth: 560)
         }
     }
 
-    private func action(_ icon: String, _ label: String, active: Bool = false, role: ButtonRole? = nil,
-                        perform: @escaping () -> Void) -> some View {
+    private func action(_ icon: String, _ label: String, active: Bool = false, badge: Bool = false,
+                        role: ButtonRole? = nil, perform: @escaping () -> Void) -> some View {
         Button(role: role, action: perform) {
             VStack(spacing: 3) {
                 Image(systemName: icon).font(.system(size: 20, weight: .semibold))
+                    .overlay(alignment: .topTrailing) {
+                        if badge { Circle().fill(Color.orange).frame(width: 9, height: 9).offset(x: 6, y: -4) }
+                    }
                 Text(label).font(.caption2).lineLimit(1)
             }
             .frame(width: 78, height: 54)

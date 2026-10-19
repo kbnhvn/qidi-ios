@@ -167,6 +167,20 @@ struct LegendCard: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    } else if model.colorMode == .tool {
+                        let colors = model.filamentColors
+                        ForEach(Array(model.usedExtruders.enumerated()), id: \.offset) { _, tool in
+                            HStack(spacing: 8) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color(hex: tool < colors.count ? colors[tool] : "#999999"))
+                                    .frame(width: 16, height: 16)
+                                Text("T\(tool + 1)").font(.footnote.monospacedDigit())
+                                if tool < model.extruderFilaments.count {
+                                    Text(model.extruderFilaments[tool].components(separatedBy: " @").first ?? "")
+                                        .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                        }
                     } else if let range = model.gcodeMesh?.valueRange {
                         GradientLegend(low: range.min, high: range.max, unit: model.colorMode.unit)
                     }

@@ -19,6 +19,7 @@ struct InspectorView: View {
     var body: some View {
         List {
             PresetsSection(isImportingProfile: $isImportingProfile, showFilaments: $showFilaments)
+            MultiFilamentSection()
             FrequentSettingsSection(showQuick: $showQuickSettings, showAll: $showAllSettings)
             ObjectsSection(isImportingModel: $isImportingModel)
             if model.selectedObject != nil { TransformSection() }
@@ -130,11 +131,35 @@ struct FrequentSettingsSection: View {
                 Text(summary).font(.footnote).foregroundStyle(.orange)
             }
 
+            if let active = model.activeUserPreset, let preset = model.userPresets[active] {
+                HStack(spacing: 8) {
+                    Image(systemName: "bookmark.fill").foregroundStyle(Color.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(active).lineLimit(1)
+                        if let parent = preset.parentLabel {
+                            Text("\(L10n.t("Basé sur")) \(parent)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    if model.isUserPresetModified {
+                        Button(L10n.t("Mettre à jour")) { model.updateActiveUserPreset() }
+                            .buttonStyle(.bordered)
+                        Circle().fill(Color.orange).frame(width: 9, height: 9)
+                            .accessibilityLabel(L10n.t("modifié"))
+                    }
+                }
+                .frame(minHeight: 44)
+            }
+
             Menu {
-                Button(L10n.t("Enregistrer les réglages actuels…")) { presetName = ""; askName = true }
-                    .disabled(model.overrides.isEmpty)
+                Button(L10n.t("Enregistrer sous…")) { presetName = model.activeUserPreset ?? ""; askName = true }
                 ForEach(model.userPresets.keys.sorted(), id: \.self) { name in
-                    Button(name) { model.applyUserPreset(name) }
+                    Button {
+                        model.applyUserPreset(name)
+                    } label: {
+                        let parent = model.userPresets[name]?.parentLabel
+                        Text(parent.map { "\(name) — \($0)" } ?? name)
+                    }
                 }
                 if !model.userPresets.isEmpty {
                     Menu(L10n.t("Supprimer un préréglage")) {
@@ -148,8 +173,10 @@ struct FrequentSettingsSection: View {
             }
             .alert(L10n.t("Nom du préréglage"), isPresented: $askName) {
                 TextField(L10n.t("Nom"), text: $presetName)
-                Button(L10n.t("Enregistrer")) { model.saveUserPreset(named: presetName) }
+                Button(L10n.t("Enregistrer")) { model.saveUserPreset(named: presetName, replacing: false) }
                 Button(L10n.t("Annuler"), role: .cancel) {}
+            } message: {
+                Text(L10n.t("Le préréglage garde le profil de départ (imprimante, impression, filament) et vos réglages."))
             }
 
             Button { showQuick = true } label: {
@@ -173,7 +200,9 @@ struct ObjectsSection: View {
     var body: some View {
         Section {
             ForEach(model.scene?.objects ?? []) { object in
-                Button { model.selectedObjectID = object.id } label: {
+                Button {
+                    if model.multiSelectMode { model.toggleSelection(object.id) } else { model.selectedObjectID = object.id }
+                } label: {
                     HStack {
                         Image(systemName: object.instances.contains { $0.outside } ? "exclamationmark.triangle.fill" : "cube")
                             .foregroundStyle(object.instances.contains { $0.outside } ? .red : .secondary)
@@ -182,7 +211,10 @@ struct ObjectsSection: View {
                             Text(sizeText(object)).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if model.selectedObjectID == object.id {
+                        if object.hasCustomSettings {
+                            Image(systemName: "slider.horizontal.3").foregroundStyle(.orange)
+                        }
+                        if model.isSelected(object.id) {
                             Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
                         }
                     }
@@ -199,6 +231,12 @@ struct ObjectsSection: View {
                 Label(L10n.t("Importer un modèle…"), systemImage: "square.and.arrow.down").frame(minHeight: 44)
             }
             if (model.scene?.objects.count ?? 0) > 1 {
+                Toggle(isOn: $model.multiSelectMode) {
+                    Label(L10n.t("Sélection multiple"), systemImage: "checkmark.circle").frame(minHeight: 44)
+                }
+                Button { model.selectAll() } label: {
+                    Label(L10n.t("Tout sélectionner"), systemImage: "square.dashed.inset.filled").frame(minHeight: 44)
+                }
                 Button { model.arrange() } label: {
                     Label(L10n.t("Organiser"), systemImage: "square.grid.3x3.square").frame(minHeight: 44)
                 }

@@ -290,6 +290,69 @@ std::string build_summary(const Slic3r::Print &print, const Slic3r::GCodeProcess
     return out;
 }
 
+/* Applique ctx->extruder_filaments au bundle : nombre d'extrudeurs de l'imprimante (donc de
+ * filaments), puis un filament par extrudeur. Un filament absent ou incompatible est remplacé
+ * par le filament principal. */
+void apply_extruders(qsid_ctx *ctx)
+{
+    Slic3r::PresetBundle &b = *ctx->presets;
+    const size_t count = std::max<size_t>(ctx->extruder_filaments.size(), 1);
+    b.printers.get_edited_preset().set_num_extruders(static_cast<unsigned>(count));
+    b.update_multi_material_filament_presets();
+    if (count == 1)
+        return;
+    const std::string main = b.filaments.get_selected_preset_name();
+    for (size_t i = 0; i < count; ++i) {
+        const std::string &wanted = ctx->extruder_filaments[i];
+        const Slic3r::Preset *f = wanted.empty() ? nullptr : b.filaments.find_preset(wanted, false, false);
+        b.set_filament_preset(i, (f && f->is_compatible) ? f->name : main);
+    }
+}
+
+/* Tableau JSON de chaînes (["a","b"]) : le seul JSON que l'ABI reçoit. */
+bool parse_string_array(const char *json, std::vector<std::string> &out)
+{
+    out.clear();
+    if (!json)
+        return true;
+    const char *p = json;
+    auto skip = [&] { while (*p == ' ' || *p == '\n' || *p == '\t' || *p == '\r') ++p; };
+    skip();
+    if (*p != '[')
+        return false;
+    ++p;
+    skip();
+    if (*p == ']')
+        return true;
+    for (;;) {
+        skip();
+        if (*p != '"')
+            return false;
+        ++p;
+        std::string item;
+        while (*p && *p != '"') {
+            if (*p == '\\' && p[1]) {
+                ++p;
+                switch (*p) {
+                case 'n': item += '\n'; break;
+                case 't': item += '\t'; break;
+                default:  item += *p;
+                }
+            } else {
+                item += *p;
+            }
+            ++p;
+        }
+        if (*p != '"')
+            return false;
+        ++p;
+        out.push_back(item);
+        skip();
+        if (*p == ',') { ++p; continue; }
+        return *p == ']';
+    }
+}
+
 // ---------------------------------------------------------------- réglages par objet
 
 std::string model_config_json(const Slic3r::ModelConfig &cfg)
@@ -379,6 +442,20 @@ std::string layer_ranges_json(const Slic3r::ModelObject *o)
         first = false;
     }
     return out + "]";
+}
+
+/* Chaque plage de hauteurs doit porter « layer_height » et « extruder » (comme
+ * ObjectList::get_default_layer_config du bureau) : layer_height_profile_from_ranges lit ces deux
+ * clés sans vérifier leur présence. */
+void ensure_range_defaults(qsid_ctx *ctx, const Slic3r::ModelObject *o, Slic3r::ModelConfig &cfg)
+{
+    if (!cfg.has("extruder"))
+        cfg.set("extruder", 0);
+    if (!cfg.has("layer_height")) {
+        const double lh = o->config.has("layer_height") ? o->config.opt_float("layer_height")
+                                                         : effective_config(ctx).opt_float("layer_height");
+        cfg.set("layer_height", lh);
+    }
 }
 
 /* Place les `fresh` autour du centre du plateau, sur la première place libre. */
@@ -554,6 +631,11 @@ int qsid_presets_select(qsid_ctx *ctx, const char *printer, const char *print, c
             }
         }
 
+        // Un changement d'imprimante remet un seul extrudeur : on réapplique le multi-couleur.
+        if (ctx->extruder_filaments.size() > 1) {
+            ctx->extruder_filaments[0] = b.filaments.get_selected_preset_name();
+            apply_extruders(ctx);
+        }
         ctx->base_config = b.full_config();
         ctx->base_from_ini = false;
         ctx->print.reset();   // un autre preset : on repart d'un Print neuf
@@ -563,6 +645,58 @@ int qsid_presets_select(qsid_ctx *ctx, const char *printer, const char *print, c
                               ",\"print\":" + jstr(b.prints.get_selected_preset_name()) +
                               ",\"filament\":" + jstr(b.filaments.get_selected_preset_name()) + "}";
             *out_json = dup_string(out);
+        }
+        return QSID_OK;
+    } catch (const std::exception &e) {
+        set_err(err_msg, err_len, e.what());
+        return QSID_ERR_SLICE_FAILED;
+    }
+}
+
+int qsid_presets_set_extruders(qsid_ctx *ctx, int count, const char *filaments_json,
+                               char **out_json, char *err_msg, size_t err_len)
+{
+    QSID_REQUIRE_CTX(ctx);
+    QSID_REQUIRE_IDLE(ctx);
+    if (!ctx->presets) {
+        set_err(err_msg, err_len, "presets not loaded");
+        return QSID_ERR_ARG;
+    }
+    if (count < 1 || count > 16) {
+        set_err(err_msg, err_len, "the number of filaments must be between 1 and 16");
+        return QSID_ERR_ARG;
+    }
+    std::vector<std::string> names;
+    if (!parse_string_array(filaments_json, names)) {
+        set_err(err_msg, err_len, "filaments_json must be a JSON array of strings");
+        return QSID_ERR_ARG;
+    }
+    try {
+        Slic3r::PresetBundle &b = *ctx->presets;
+        names.resize(static_cast<size_t>(count));
+        if (names[0].empty())
+            names[0] = b.filaments.get_selected_preset_name();
+        else if (const Slic3r::Preset *f = b.filaments.find_preset(names[0], false, false); f && f->is_compatible) {
+            b.filaments.select_preset_by_name(names[0], true);
+            b.set_filament_preset(0, names[0]);
+        }
+        if (count > 1)
+            ctx->extruder_filaments = names;
+        else
+            ctx->extruder_filaments.clear();
+        apply_extruders(ctx);
+        ctx->base_config = b.full_config();
+        ctx->base_from_ini = false;
+        ctx->print.reset();
+
+        if (out_json) {
+            std::string out = "{\"count\":" + std::to_string(count) + ",\"filaments\":[";
+            for (int i = 0; i < count; ++i) {
+                const std::string name = count == 1 ? b.filaments.get_selected_preset_name()
+                                                    : b.extruders_filaments[static_cast<size_t>(i)].get_selected_preset_name();
+                out += (i ? "," : "") + jstr(name);
+            }
+            *out_json = dup_string(out + "]}");
         }
         return QSID_OK;
     } catch (const std::exception &e) {
@@ -723,6 +857,7 @@ int qsid_config_schema(qsid_ctx *ctx, char **out_json)
         out += ",\"nullable\":" + std::string(def.nullable ? "true" : "false");
         out += ",\"multiline\":" + std::string(def.multiline ? "true" : "false");
         out += ",\"readonly\":" + std::string(def.readonly ? "true" : "false");
+        out += ",\"per_object\":" + std::string(per_object_key(entry.first) ? "true" : "false");
         if (def.min > -1e30f)
             out += ",\"min\":" + jnum(def.min);
         if (def.max < 1e30f)
@@ -1323,7 +1458,7 @@ int qsid_layer_range_set(qsid_ctx *ctx, uint64_t object_id, double min_z, double
             set_err(err_msg, err_len, err);
             return QSID_ERR_ARG;
         }
-        o->layer_config_ranges.emplace(range, std::move(cfg));
+        it = o->layer_config_ranges.emplace(range, std::move(cfg)).first;
     } else if (key && *key && value) {
         std::string err;
         if (!set_model_config(it->second, key, value, err)) {
@@ -1331,6 +1466,7 @@ int qsid_layer_range_set(qsid_ctx *ctx, uint64_t object_id, double min_z, double
             return QSID_ERR_ARG;
         }
     }
+    ensure_range_defaults(ctx, o, it->second);
     o->layer_height_profile.clear();   // le profil manuel serait recalculé à partir des plages
     ctx->print.reset();
     return QSID_OK;
@@ -1347,9 +1483,9 @@ int qsid_layer_range_remove(qsid_ctx *ctx, uint64_t object_id, double min_z, dou
     if (it == o->layer_config_ranges.end())
         return QSID_ERR_ARG;
     if (key && *key) {
+        // layer_height et extruder sont obligatoires : les « retirer » les remet à leur valeur par défaut
         it->second.erase(key);
-        if (it->second.empty())
-            o->layer_config_ranges.erase(it);
+        ensure_range_defaults(ctx, o, it->second);
     } else {
         o->layer_config_ranges.erase(it);
     }
