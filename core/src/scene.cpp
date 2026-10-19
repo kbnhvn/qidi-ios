@@ -11,6 +11,7 @@
 #include "ctx.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <functional>
 #include <locale>
@@ -75,13 +76,6 @@ constexpr double kRad2Deg = 180.0 / M_PI;
 constexpr double kDeg2Rad = M_PI / 180.0;
 
 // ---------------------------------------------------------------- aides
-
-/* Libère le drapeau `slicing` à la sortie. */
-struct BusyCheck {
-    qsid_ctx *ctx;
-    bool ok;
-    explicit BusyCheck(qsid_ctx *c) : ctx(c), ok(!c->slicing.load()) {}
-};
 
 #define QSID_REQUIRE_CTX(ctx) \
     if (!(ctx) || !(ctx)->initialized) return QSID_ERR_NO_CONTEXT
@@ -224,17 +218,73 @@ void update_volume_state(qsid_ctx *ctx, const Slic3r::DynamicPrintConfig &cfg)
     ctx->model.update_print_volume_state(build_volume);
 }
 
-const char *kind_name(const std::string &kind)
-{
-    return kind.c_str();
-}
-
 Slic3r::PresetCollection *collection_for(Slic3r::PresetBundle &b, const std::string &kind)
 {
     if (kind == "printer")  return &b.printers;
     if (kind == "print")    return &b.prints;
     if (kind == "filament") return &b.filaments;
     return nullptr;
+}
+
+std::string role_name(int r)
+{
+    static const char *names[] = {"none", "perimeter", "external_perimeter", "overhang_perimeter",
+        "internal_infill", "solid_infill", "top_solid_infill", "ironing", "bridge_infill", "gap_fill",
+        "skirt", "support_material", "support_material_interface", "wipe_tower", "custom"};
+    return (r >= 0 && r < 15) ? names[r] : "none";
+}
+
+std::string build_summary(const Slic3r::Print &print, const Slic3r::GCodeProcessorResult &result)
+{
+    const Slic3r::PrintStatistics &st = print.print_statistics();
+
+    uint32_t layers = 0;
+    std::map<int, double> time_by_role;
+    for (const auto &mv : result.moves) {
+        layers = std::max<uint32_t>(layers, mv.layer_id + 1);
+        if (mv.type == Slic3r::EMoveType::Extrude)
+            time_by_role[static_cast<int>(mv.extrusion_role)] += mv.time[0];
+    }
+
+    std::string out = "{";
+    out += "\"time_normal_s\":" + jnum(st.normal_print_time_seconds);
+    out += ",\"time_silent_s\":" + jnum(st.silent_print_time_seconds);
+    out += ",\"time_normal\":" + jstr(st.estimated_normal_print_time);
+    out += ",\"time_silent\":" + jstr(st.estimated_silent_print_time);
+    out += ",\"filament_mm\":" + jnum(st.total_used_filament);
+    out += ",\"filament_cm3\":" + jnum(st.total_extruded_volume / 1000.0);
+    out += ",\"filament_g\":" + jnum(st.total_weight);
+    out += ",\"cost\":" + jnum(st.total_cost);
+    out += ",\"toolchanges\":" + std::to_string(st.total_toolchanges);
+    out += ",\"layers\":" + std::to_string(layers);
+    out += ",\"moves\":" + std::to_string(result.moves.size());
+    out += ",\"roles\":[";
+    bool first = true;
+    for (const auto &kv : time_by_role) {
+        double mm = 0, g = 0;
+        auto it = result.print_statistics.used_filaments_per_role.find(static_cast<Slic3r::GCodeExtrusionRole>(kv.first));
+        if (it != result.print_statistics.used_filaments_per_role.end()) {
+            mm = it->second.first;   // m dans le moteur, converti plus bas
+            g  = it->second.second;
+        }
+        out += (first ? "" : ",") + std::string("{\"role\":") + std::to_string(kv.first);
+        out += ",\"name\":" + jstr(role_name(kv.first));
+        out += ",\"time_s\":" + jnum(kv.second);
+        out += ",\"filament_m\":" + jnum(mm) + ",\"filament_g\":" + jnum(g) + "}";
+        first = false;
+    }
+    out += "]";
+    out += ",\"warnings\":[";
+    first = true;
+    if (result.conflict_result.has_value()) {
+        out += jstr("Collision between objects " + result.conflict_result->_objName1 + " and " +
+                    result.conflict_result->_objName2);
+        first = false;
+    }
+    if (result.sequential_collision_detected.has_value())
+        out += (first ? "" : ",") + jstr("Sequential printing collision");
+    out += "]}";
+    return out;
 }
 
 } // namespace
@@ -508,12 +558,6 @@ int qsid_config_schema(qsid_ctx *ctx, char **out_json)
     if (!out_json)
         return QSID_ERR_ARG;
 
-    static const char *const type_names[] = {
-        "unknown", "float", "floats", "int", "ints", "string", "strings", "percent", "percents",
-        "float_or_percent", "floats_or_percents", "point", "points", "point3", "bool", "bools",
-        "enum", "enums"
-    };
-
     std::string out = "[";
     bool first = true;
     for (const auto &entry : Slic3r::print_config_def.options) {
@@ -524,7 +568,6 @@ int qsid_config_schema(qsid_ctx *ctx, char **out_json)
             out += ",";
         first = false;
 
-        const size_t t = static_cast<size_t>(def.type);
         const char *type = "unknown";
         switch (def.type) {
         case Slic3r::coFloat:            type = "float"; break;
@@ -546,7 +589,6 @@ int qsid_config_schema(qsid_ctx *ctx, char **out_json)
         case Slic3r::coEnums:            type = "enums"; break;
         default: break;
         }
-        (void) type_names; (void) t;
 
         const char *mode = def.mode == Slic3r::comSimple ? "simple"
                          : def.mode == Slic3r::comAdvanced ? "advanced" : "expert";
@@ -884,71 +926,6 @@ int qsid_scene_lay_on_face(qsid_ctx *ctx, uint64_t object_id, int instance, size
 }
 
 // ============================================================ Slicing
-
-namespace {
-
-std::string role_name(int r)
-{
-    static const char *names[] = {"none", "perimeter", "external_perimeter", "overhang_perimeter",
-        "internal_infill", "solid_infill", "top_solid_infill", "ironing", "bridge_infill", "gap_fill",
-        "skirt", "support_material", "support_material_interface", "wipe_tower", "custom"};
-    return (r >= 0 && r < 15) ? names[r] : "none";
-}
-
-std::string build_summary(const Slic3r::Print &print, const Slic3r::GCodeProcessorResult &result)
-{
-    const Slic3r::PrintStatistics &st = print.print_statistics();
-
-    uint32_t layers = 0;
-    std::map<int, double> time_by_role;
-    for (const auto &mv : result.moves) {
-        layers = std::max<uint32_t>(layers, mv.layer_id + 1);
-        if (mv.type == Slic3r::EMoveType::Extrude)
-            time_by_role[static_cast<int>(mv.extrusion_role)] += mv.time[0];
-    }
-
-    std::string out = "{";
-    out += "\"time_normal_s\":" + jnum(st.normal_print_time_seconds);
-    out += ",\"time_silent_s\":" + jnum(st.silent_print_time_seconds);
-    out += ",\"time_normal\":" + jstr(st.estimated_normal_print_time);
-    out += ",\"time_silent\":" + jstr(st.estimated_silent_print_time);
-    out += ",\"filament_mm\":" + jnum(st.total_used_filament);
-    out += ",\"filament_cm3\":" + jnum(st.total_extruded_volume / 1000.0);
-    out += ",\"filament_g\":" + jnum(st.total_weight);
-    out += ",\"cost\":" + jnum(st.total_cost);
-    out += ",\"toolchanges\":" + std::to_string(st.total_toolchanges);
-    out += ",\"layers\":" + std::to_string(layers);
-    out += ",\"moves\":" + std::to_string(result.moves.size());
-    out += ",\"roles\":[";
-    bool first = true;
-    for (const auto &kv : time_by_role) {
-        double mm = 0, g = 0;
-        auto it = result.print_statistics.used_filaments_per_role.find(static_cast<Slic3r::GCodeExtrusionRole>(kv.first));
-        if (it != result.print_statistics.used_filaments_per_role.end()) {
-            mm = it->second.first;   // m dans le moteur, converti plus bas
-            g  = it->second.second;
-        }
-        out += (first ? "" : ",") + std::string("{\"role\":") + std::to_string(kv.first);
-        out += ",\"name\":" + jstr(role_name(kv.first));
-        out += ",\"time_s\":" + jnum(kv.second);
-        out += ",\"filament_m\":" + jnum(mm) + ",\"filament_g\":" + jnum(g) + "}";
-        first = false;
-    }
-    out += "]";
-    out += ",\"warnings\":[";
-    first = true;
-    if (result.conflict_result.has_value()) {
-        out += jstr("Collision between objects " + result.conflict_result->_objName1 + " and " +
-                    result.conflict_result->_objName2);
-        first = false;
-    }
-    if (result.sequential_collision_detected.has_value())
-        out += (first ? "" : ",") + jstr("Sequential printing collision");
-    out += "]}";
-    return out;
-}
-
-} // namespace
 
 int qsid_slice_scene(qsid_ctx *ctx, const char *out_gcode, qsid_progress_cb cb, void *user,
                      char **out_summary_json, char *err_msg, size_t err_len)

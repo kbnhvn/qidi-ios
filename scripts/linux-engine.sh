@@ -12,6 +12,7 @@
 #   scripts/linux-engine.sh build        # configure + compile (≈ 50 min à froid, 4 cœurs)
 #   scripts/linux-engine.sh gate         # lance les gates
 #   scripts/linux-engine.sh sync         # recopie core/ dans l'arbre amont et recompile (rapide)
+#   scripts/linux-engine.sh clang        # analyse de notre code avec clang -Werror (comme macOS/iOS)
 set -euo pipefail
 . "$(dirname "$0")/lib/common.sh"
 
@@ -100,10 +101,26 @@ cmd_gate() {
         2>&1 | grep -v "Vendor Config Bundle\|invalid toolchange"
 }
 
+# Analyse de notre code (ios-core) avec clang -Werror, comme le compilateur de macOS/iOS : GCC
+# laisse passer des constructions que clang refuse (ex. fonction C++ déclarée dans un bloc extern "C").
+cmd_clang() {
+    command -v clang++ >/dev/null || { echo "clang++ absent (apt install clang)" >&2; exit 3; }
+    local status=0
+    for entry in "qidislice.dir/src/qidislice.cpp" "qidislice.dir/src/scene.cpp" "qidislice.dir/src/step_stub.cpp" \
+                 "qidislice_gate.dir/gate/main.cpp" "qidislice_scene_gate.dir/gate/scene_gate.cpp"; do
+        local obj="src/ios-core/CMakeFiles/$entry.o" cmd
+        cmd="$(cd "$LX/build" && ninja -t commands "$obj" | tail -1)"
+        cmd="$(printf '%s' "$cmd" | sed 's#ccache /usr/bin/c++#clang++#; s#-fext-numeric-literals##; s# -o [^ ]*\.o# -fsyntax-only#; s#-MD -MT [^ ]* -MF [^ ]*##')"
+        if out="$(cd "$LX/build" && eval "$cmd" 2>&1)"; then echo "clang ok : $entry"; else echo "clang ÉCHEC : $entry"; printf '%s\n' "$out" | grep -E 'error|warning' | head -5; status=1; fi
+    done
+    return $status
+}
+
 case "${1:-}" in
+    clang) cmd_clang ;;
     deps)  cmd_deps ;;
     build) cmd_build ;;
     sync)  cmd_sync ;;
     gate)  cmd_gate ;;
-    *) echo "usage: $0 deps|build|sync|gate" >&2; exit 2 ;;
+    *) echo "usage: $0 deps|build|sync|gate|clang" >&2; exit 2 ;;
 esac
