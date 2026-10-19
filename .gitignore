@@ -19,3 +19,7 @@ DerivedData/
 .DS_Store
 *.o
 *.a
+
+# SwiftPM
+.build/
+.swiftpm/
